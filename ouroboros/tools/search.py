@@ -26,24 +26,21 @@ def _web_search(ctx: ToolContext, query: str) -> str:
         return json.dumps({"error": "OPENAI_API_KEY not set; web_search unavailable."})
     try:
         from openai import OpenAI
-        client = OpenAI(api_key=api_key)
+        client = OpenAI(api_key=key)
         model = _resolve_websearch_model()
         resp = client.responses.create(
             model=model,
-            tools=[{"type": "web_search"}],
+            tools=[{"type": "web_search_preview"}],  # fixed: was "web_search"
             tool_choice="auto",
             input=query,
         )
         d = resp.model_dump()
         text = ""
-        sources = []
         for item in d.get("output", []) or []:
             if item.get("type") == "message":
                 for block in item.get("content", []) or []:
                     if block.get("type") in ("output_text", "text"):
                         text += block.get("text", "")
-            elif item.get("type") == "web_search_call":
-                pass  # search call metadata, not needed
         return json.dumps({"answer": text or "(no answer)"}, ensure_ascii=False, indent=2)
     except Exception as e:
         return json.dumps({"error": repr(e)}, ensure_ascii=False)
