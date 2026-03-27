@@ -1,7 +1,7 @@
 """
 Ouroboros — LLM client.
 
-The only module that communicates with the LLM API (OpenRouter).
+The only module that communicates with the LLM API (OpenRouter or Cloud.ru).
 Contract: chat(), default_model(), available_models(), add_usage().
 """
 
@@ -15,6 +15,34 @@ from typing import Any, Dict, List, Optional, Tuple
 log = logging.getLogger(__name__)
 
 DEFAULT_LIGHT_MODEL = "google/gemini-3-pro-preview"
+
+# Cloud.ru model prefixes — these are routed to foundation-models.api.cloud.ru
+CLOUDRU_PREFIXES = (
+    "GigaChat/",
+    "Qwen/",
+    "zai-org/",
+    "t-tech/",
+    "MiniMaxAI/",
+    "deepseek-ai/",
+    "openai/gpt-oss",
+    "BAAI/",
+    "ai-sage/",
+)
+
+CLOUDRU_BASE_URL = "https://foundation-models.api.cloud.ru/v1"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _detect_provider(model: str) -> Tuple[str, str]:
+    """
+    Detect the right provider for a model.
+
+    Returns (base_url, api_key_env_var).
+    """
+    for prefix in CLOUDRU_PREFIXES:
+        if model.startswith(prefix):
+            return CLOUDRU_BASE_URL, "CLOUDRU_API_KEY"
+    return OPENROUTER_BASE_URL, "OPENROUTER_API_KEY"
 
 
 def normalize_reasoning_effort(value: str, default: str = "medium") -> str:
@@ -103,36 +131,72 @@ def fetch_openrouter_pricing() -> Dict[str, Tuple[float, float, float]]:
 
 
 class LLMClient:
-    """OpenRouter API wrapper. All LLM calls go through this class."""
+    """
+    LLM client supporting OpenRouter and Cloud.ru Foundation Models.
+
+    Provider is auto-detected from model name:
+    - Qwen/, GigaChat/, zai-org/, t-tech/, etc. → Cloud.ru
+    - Everything else → OpenRouter
+    """
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://openrouter.ai/api/v1",
+        base_url: str = OPENROUTER_BASE_URL,
     ):
-        self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        self._base_url = base_url
-        self._client = None
+        # Legacy init — kept for backwards compat (used when model is not known yet)
+        self._default_api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        self._default_base_url = base_url
+        # Cache of (base_url, api_key) -> OpenAI client
+        self._clients: Dict[Tuple[str, str], Any] = {}
+
+    def _get_client_for_model(self, model: str):
+        """Get (or create) an OpenAI client appropriate for the given model."""
+        base_url, api_key_env = _detect_provider(model)
+        api_key = os.environ.get(api_key_env, "")
+        if not api_key:
+            # fallback to default (OpenRouter) if env var not set
+            api_key = self._default_api_key
+            base_url = self._default_base_url
+
+        cache_key = (base_url, api_key)
+        if cache_key not in self._clients:
+            from openai import OpenAI
+            extra_headers: Dict[str, str] = {}
+            if base_url == OPENROUTER_BASE_URL:
+                extra_headers = {
+                    "HTTP-Referer": "https://colab.research.google.com/",
+                    "X-Title": "Ouroboros",
+                }
+            self._clients[cache_key] = OpenAI(
+                base_url=base_url,
+                api_key=api_key,
+                default_headers=extra_headers,
+            )
+        return self._clients[cache_key], base_url
 
     def _get_client(self):
-        if self._client is None:
+        """Legacy: return the default OpenRouter client."""
+        cache_key = (self._default_base_url, self._default_api_key)
+        if cache_key not in self._clients:
             from openai import OpenAI
-            self._client = OpenAI(
-                base_url=self._base_url,
-                api_key=self._api_key,
+            self._clients[cache_key] = OpenAI(
+                base_url=self._default_base_url,
+                api_key=self._default_api_key,
                 default_headers={
                     "HTTP-Referer": "https://colab.research.google.com/",
                     "X-Title": "Ouroboros",
                 },
             )
-        return self._client
+        return self._clients[cache_key]
 
     def _fetch_generation_cost(self, generation_id: str) -> Optional[float]:
         """Fetch cost from OpenRouter Generation API as fallback."""
         try:
             import requests
-            url = f"{self._base_url.rstrip('/')}/generation?id={generation_id}"
-            resp = requests.get(url, headers={"Authorization": f"Bearer {self._api_key}"}, timeout=5)
+            url = f"{OPENROUTER_BASE_URL}/generation?id={generation_id}"
+            api_key = os.environ.get("OPENROUTER_API_KEY", self._default_api_key)
+            resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
             if resp.status_code == 200:
                 data = resp.json().get("data") or {}
                 cost = data.get("total_cost") or data.get("usage", {}).get("cost")
@@ -140,7 +204,7 @@ class LLMClient:
                     return float(cost)
             # Generation might not be ready yet — retry once after short delay
             time.sleep(0.5)
-            resp = requests.get(url, headers={"Authorization": f"Bearer {self._api_key}"}, timeout=5)
+            resp = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=5)
             if resp.status_code == 200:
                 data = resp.json().get("data") or {}
                 cost = data.get("total_cost") or data.get("usage", {}).get("cost")
@@ -161,36 +225,41 @@ class LLMClient:
         tool_choice: str = "auto",
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         """Single LLM call. Returns: (response_message_dict, usage_dict with cost)."""
-        client = self._get_client()
-        effort = normalize_reasoning_effort(reasoning_effort)
-
-        extra_body: Dict[str, Any] = {
-            "reasoning": {"effort": effort, "exclude": True},
-        }
-
-        # Pin Anthropic models to Anthropic provider for prompt caching
-        if model.startswith("anthropic/"):
-            extra_body["provider"] = {
-                "order": ["Anthropic"],
-                "allow_fallbacks": False,
-                "require_parameters": True,
-            }
+        client, base_url = self._get_client_for_model(model)
+        is_cloudru = (base_url == CLOUDRU_BASE_URL)
 
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
-            "extra_body": extra_body,
         }
+
+        if not is_cloudru:
+            # OpenRouter-specific extras
+            effort = normalize_reasoning_effort(reasoning_effort)
+            extra_body: Dict[str, Any] = {
+                "reasoning": {"effort": effort, "exclude": True},
+            }
+            # Pin Anthropic models to Anthropic provider for prompt caching
+            if model.startswith("anthropic/"):
+                extra_body["provider"] = {
+                    "order": ["Anthropic"],
+                    "allow_fallbacks": False,
+                    "require_parameters": True,
+                }
+            kwargs["extra_body"] = extra_body
+
         if tools:
-            # Add cache_control to last tool for Anthropic prompt caching
-            # This caches all tool schemas (they never change between calls)
-            tools_with_cache = [t for t in tools]  # shallow copy
-            if tools_with_cache:
-                last_tool = {**tools_with_cache[-1]}  # copy last tool
-                last_tool["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
-                tools_with_cache[-1] = last_tool
-            kwargs["tools"] = tools_with_cache
+            if not is_cloudru:
+                # Add cache_control to last tool for Anthropic prompt caching
+                tools_with_cache = [t for t in tools]  # shallow copy
+                if tools_with_cache:
+                    last_tool = {**tools_with_cache[-1]}  # copy last tool
+                    last_tool["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
+                    tools_with_cache[-1] = last_tool
+                kwargs["tools"] = tools_with_cache
+            else:
+                kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice
 
         resp = client.chat.completions.create(**kwargs)
@@ -206,8 +275,6 @@ class LLMClient:
                 usage["cached_tokens"] = int(prompt_details["cached_tokens"])
 
         # Extract cache_write_tokens from prompt_tokens_details if available
-        # OpenRouter: "cache_write_tokens"
-        # Native Anthropic: "cache_creation_tokens" or "cache_creation_input_tokens"
         if not usage.get("cache_write_tokens"):
             prompt_details_for_write = usage.get("prompt_tokens_details") or {}
             if isinstance(prompt_details_for_write, dict):
@@ -217,8 +284,8 @@ class LLMClient:
                 if cache_write:
                     usage["cache_write_tokens"] = int(cache_write)
 
-        # Ensure cost is present in usage (OpenRouter includes it, but fallback if missing)
-        if not usage.get("cost"):
+        # Ensure cost is present in usage (OpenRouter includes it; Cloud.ru doesn't)
+        if not usage.get("cost") and not is_cloudru:
             gen_id = resp_dict.get("id") or ""
             if gen_id:
                 cost = self._fetch_generation_cost(gen_id)
@@ -292,4 +359,16 @@ class LLMClient:
             models.append(code)
         if light and light != main and light != code:
             models.append(light)
+        # Add Cloud.ru models if key is available
+        if os.environ.get("CLOUDRU_API_KEY"):
+            cloudru_models = [
+                "Qwen/Qwen3-235B-A22B-Instruct-2507",
+                "Qwen/Qwen3-Coder-480B-A35B-Instruct",
+                "GigaChat/GigaChat-2-Max",
+                "zai-org/GLM-4.7",
+                "MiniMaxAI/MiniMax-M2",
+            ]
+            for m in cloudru_models:
+                if m not in models:
+                    models.append(m)
         return models
