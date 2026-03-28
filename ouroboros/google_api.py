@@ -9,13 +9,15 @@ from __future__ import annotations
 import logging
 import os
 import pathlib
-from typing import Any, Dict, List, Optional
+import tempfile
+from typing import Any, Optional
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
 log = logging.getLogger(__name__)
 
@@ -121,10 +123,9 @@ def drive_read_api(file_path: str) -> str:
                 pass
             # Download file content
             from io import BytesIO
-            import tempfile
             request = service.files().get_media(fileId=file_id)
             fh = BytesIO()
-            downloader = googleapiclient.http.MediaIoBaseDownload(fh, request)
+            downloader = MediaIoBaseDownload(fh, request)
             done = False
             while not done:
                 status, done = downloader.next_chunk()
@@ -132,7 +133,6 @@ def drive_read_api(file_path: str) -> str:
             try:
                 return content_bytes.decode("utf-8")
             except UnicodeDecodeError:
-                # Try other encodings?
                 return content_bytes.decode("utf-8", errors="replace")
         else:
             parent_id = files[0]["id"]
@@ -164,13 +164,7 @@ def drive_write_api(file_path: str, content: str, mode: str = "overwrite") -> st
     query = f"name='{filename}' and '{parent_id}' in parents and trashed=false"
     res = service.files().list(q=query, fields="files(id, name)").execute()
     existing = res.get("files", [])
-    media_body = googleapiclient.http.MediaFileUpload(
-        filename,  # We'll write to temp file
-        mimetype="text/plain",
-        resumable=False,
-    )
-    # Since we have content as string, write to temp file
-    import tempfile
+    # Write to temp file
     tmp = tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False, suffix=".txt")
     tmp_path = tmp.name
     tmp.write(content)
@@ -178,12 +172,12 @@ def drive_write_api(file_path: str, content: str, mode: str = "overwrite") -> st
     try:
         if existing and mode == "overwrite":
             file_id = existing[0]["id"]
-            media_body = googleapiclient.http.MediaFileUpload(tmp_path, mimetype="text/plain")
+            media_body = MediaFileUpload(tmp_path, mimetype="text/plain")
             service.files().update(fileId=file_id, media_body=media_body).execute()
             msg = f"Updated file {file_path} via API"
         else:
             file_metadata = {"name": filename, "parents": [parent_id]}
-            media_body = googleapiclient.http.MediaFileUpload(tmp_path, mimetype="text/plain")
+            media_body = MediaFileUpload(tmp_path, mimetype="text/plain")
             service.files().create(body=file_metadata, media_body=media_body).execute()
             msg = f"Created file {file_path} via API"
     finally:
@@ -191,7 +185,7 @@ def drive_write_api(file_path: str, content: str, mode: str = "overwrite") -> st
     log.info(msg)
     return msg
 
-# Gmail and Calendar placeholder — can be expanded later
+# Gmail and Calendar placeholders — can be expanded later
 def get_gmail_service() -> Optional[Any]:
     creds_path = os.environ.get("GOOGLE_CREDENTIALS_PATH")
     if not creds_path:
