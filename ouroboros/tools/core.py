@@ -16,6 +16,10 @@ from ouroboros.utils import read_text, safe_relpath, utc_now_iso
 log = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Internal helpers (not exposed as tools)
+# ---------------------------------------------------------------------------
+
 def _list_dir(root: pathlib.Path, rel: str, max_entries: int = 500) -> List[str]:
     target = (root / safe_relpath(rel)).resolve()
     if not target.exists():
@@ -35,6 +39,28 @@ def _list_dir(root: pathlib.Path, rel: str, max_entries: int = 500) -> List[str]
     return items
 
 
+def _extract_python_symbols(file_path: pathlib.Path) -> Tuple[List[str], List[str]]:
+    """Extract class and function names from a Python file using AST."""
+    try:
+        code = file_path.read_text(encoding="utf-8")
+        tree = ast.parse(code, filename=str(file_path))
+        classes = []
+        functions = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                classes.append(node.name)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                functions.append(node.name)
+        return list(dict.fromkeys(classes)), list(dict.fromkeys(functions))
+    except Exception:
+        log.warning(f"Failed to extract Python symbols from {file_path}", exc_info=True)
+        return [], []
+
+
+# ---------------------------------------------------------------------------
+# Tool handlers
+# ---------------------------------------------------------------------------
+
 def _repo_read(ctx: ToolContext, path: str) -> str:
     return read_text(ctx.repo_path(path))
 
@@ -42,10 +68,6 @@ def _repo_read(ctx: ToolContext, path: str) -> str:
 def _repo_list(ctx: ToolContext, dir: str = ".", max_entries: int = 500) -> str:
     return json.dumps(_list_dir(ctx.repo_dir, dir, max_entries), ensure_ascii=False, indent=2)
 
-
-# ---------------------------------------------------------------------------
-# Google Drive integration (API with filesystem fallback)
-# ---------------------------------------------------------------------------
 
 def _drive_read(ctx: ToolContext, path: str) -> str:
     """Read a text file from Google Drive.
@@ -92,10 +114,6 @@ def _drive_write(ctx: ToolContext, path: str, content: str, mode: str = "overwri
         return f"OK: wrote {mode} {path} ({len(content)} chars)"
 
 
-# ---------------------------------------------------------------------------
-# Send photo to owner
-# ---------------------------------------------------------------------------
-
 def _send_photo(ctx: ToolContext, image_base64: str, caption: str = "") -> str:
     """Send a base64-encoded image to the owner's Telegram chat."""
     if not ctx.current_chat_id:
@@ -118,34 +136,6 @@ def _send_photo(ctx: ToolContext, image_base64: str, caption: str = "") -> str:
         "caption": caption or "",
     })
     return "OK: photo queued for delivery to owner."
-
-
-# ---------------------------------------------------------------------------
-# Codebase digest
-# ---------------------------------------------------------------------------
-
-_SKIP_DIRS = frozenset({
-    ".git", "__pycache__", "node_modules", ".venv", "venv",
-    ".pytest_cache", ".mypy_cache", ".tox", "build", "dist",
-})
-
-
-def _extract_python_symbols(file_path: pathlib.Path) -> Tuple[List[str], List[str]]:
-    """Extract class and function names from a Python file using AST."""
-    try:
-        code = file_path.read_text(encoding="utf-8")
-        tree = ast.parse(code, filename=str(file_path))
-        classes = []
-        functions = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                classes.append(node.name)
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                functions.append(node.name)
-        return list(dict.fromkeys(classes)), list(dict.fromkeys(functions))
-    except Exception:
-        log.warning(f"Failed to extract Python symbols from {file_path}", exc_info=True)
-        return [], []
 
 
 def _codebase_digest(ctx: ToolContext) -> str:
@@ -225,12 +215,8 @@ def _codebase_digest(ctx: ToolContext) -> str:
     return header + "\n" + "\n".join(sections)
 
 
-# ---------------------------------------------------------------------------
-# Summarize dialogue
-# ---------------------------------------------------------------------------
-
 def _summarize_dialogue(ctx: ToolContext, last_n: int = 200) -> str:
-    """Summarize dialogue history into key moments, decisions, and creator preferences."""
+    """Summarize recent chat history into key decisions, creator preferences, and patterns. Writes summary to memory/dialogue_summary.md. Cost: uses OUROBOROS_MODEL_LIGHT."""
     from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
 
     # Read last_n messages from chat.jsonl
@@ -339,10 +325,6 @@ Now write a comprehensive summary:"""
         return f"⚠️ Error: {repr(e)}"
 
 
-# ---------------------------------------------------------------------------
-# forward_to_worker — LLM-initiated message routing to worker tasks
-# ---------------------------------------------------------------------------
-
 def _forward_to_worker(ctx: ToolContext, task_id: str, message: str) -> str:
     """Forward a message to a running worker task's mailbox."""
     from ouroboros.owner_inject import write_owner_message
@@ -353,6 +335,11 @@ def _forward_to_worker(ctx: ToolContext, task_id: str, message: str) -> str:
 # ---------------------------------------------------------------------------
 # Tool registration
 # ---------------------------------------------------------------------------
+
+_SKIP_DIRS = frozenset({
+    ".git", "__pycache__", "node_modules", ".venv", "venv",
+    ".pytest_cache", ".mypy_cache", ".tox", "build", "dist",
+})
 
 def get_tools() -> List[ToolEntry]:
     return [
@@ -407,16 +394,14 @@ def get_tools() -> List[ToolEntry]:
             "name": "codebase_digest",
             "description": "Get a compact digest of the entire codebase: files, sizes, classes, functions. One call instead of many repo_* calls.",
             "parameters": {"type": "object", "properties": {}},
-            "lambda": lambda ctx: _codebase_digest(ctx),
-        }),
+        }, _codebase_digest),
         ToolEntry("summarize_dialogue", {
             "name": "summarize_dialogue",
             "description": "Summarize recent chat history into key decisions, creator preferences, and patterns. Writes summary to memory/dialogue_summary.md. Cost: uses OUROBOROS_MODEL_LIGHT.",
             "parameters": {"type": "object", "properties": {
                 "last_n": {"type": "integer", "default": 200, "description": "Number of recent messages to summarize"},
             }, "required": []},
-            "lambda": lambda ctx: _summarize_dialogue(ctx, last_n=200),
-        }),
+        }, _summarize_dialogue),
         ToolEntry("forward_to_worker", {
             "name": "forward_to_worker",
             "description": "Forward a message to a running worker task's mailbox (LLM-initiated routing).",
