@@ -378,284 +378,47 @@ def update_budget_from_usage(usage: Dict[str, Any]) -> None:
                                     "or_delta": round(or_delta, 4),
                                     "abs_diff": round(abs_diff, 4),
                                     "spent_calls": st["spent_calls"],
-                                    "note": "High drift expected if OR key is shared or tracking had early bugs",
-                                }
+                                    "note": "High drift detected",
+                                },
                             )
-                        else:
-                            st["budget_drift_alert"] = False
-                    else:
-                        st["budget_drift_pct"] = 0.0
-                        st["budget_drift_alert"] = False
-
                 _save_state_unlocked(st)
             finally:
                 release_file_lock(STATE_LOCK_PATH, lock_fd)
 
 
-# ---------------------------------------------------------------------------
-# Budget breakdown by category
-# ---------------------------------------------------------------------------
-
-def budget_breakdown(st: Dict[str, Any]) -> Dict[str, float]:
-    """
-    Calculate budget breakdown by category from events.jsonl.
-
-    Reads llm_usage events and aggregates cost_usd by category field.
-    Returns dict like {"task": 12.5, "evolution": 45.2, ...}
-    """
-    events_path = DRIVE_ROOT / "logs" / "events.jsonl"
-    if not events_path.exists():
-        return {}
-
-    breakdown: Dict[str, float] = {}
+def rotate_chat_log_if_needed(max_mb: float = 10.0, keep_files: int = 5) -> None:
+    """Rotate chat.jsonl if it exceeds max_mb (megabytes). Keep most recent keep_files."""
+    log_path = DRIVE_ROOT / "logs" / "chat.jsonl"
+    if not log_path.exists():
+        return
     try:
-        with events_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                    if event.get("type") != "llm_usage":
-                        continue
-
-                    # Get category (default to "other" if not present)
-                    category = event.get("category", "other")
-
-                    # Get cost from either top-level "cost" or nested "usage.cost"
-                    cost = 0.0
-                    if "cost" in event:
-                        cost = float(event.get("cost", 0))
-                    elif "usage" in event and isinstance(event["usage"], dict):
-                        cost = float(event["usage"].get("cost", 0))
-
-                    if cost > 0:
-                        breakdown[category] = breakdown.get(category, 0.0) + cost
-
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    continue
+        size_mb = log_path.stat().st_size / (1024 * 1024)
+        if size_mb < max_mb:
+            return
+        ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        archive_path = DRIVE_ROOT / "logs" / f"chat.{ts}.jsonl"
+        log_path.rename(archive_path)
+        log_path.write_text("", encoding="utf-8")
+        # prune old archives
+        archives = sorted((DRIVE_ROOT / "logs").glob("chat.*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in archives[keep_files:]:
+            try:
+                old.unlink()
+            except Exception:
+                pass
     except Exception:
-        log.warning("Failed to calculate budget breakdown", exc_info=True)
-
-    return breakdown
+        log.warning("Failed to rotate chat log", exc_info=True)
 
 
-def model_breakdown(st: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
-    """
-    Calculate budget breakdown by model from events.jsonl.
-
-    Returns dict like:
-    {
-        "anthropic/claude-sonnet-4.6": {"cost": 12.5, "calls": 120, "prompt_tokens": 50000, "completion_tokens": 3000},
-        "openai/gpt-4o": {"cost": 3.2, "calls": 15, ...},
-    }
-    """
-    events_path = DRIVE_ROOT / "logs" / "events.jsonl"
-    if not events_path.exists():
-        return {}
-
-    breakdown: Dict[str, Dict[str, float]] = {}
-    try:
-        with events_path.open("r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                    if event.get("type") != "llm_usage":
-                        continue
-
-                    model = event.get("model") or "unknown"
-                    if not model:
-                        model = "unknown"
-
-                    # Get cost
-                    cost = 0.0
-                    if "cost" in event:
-                        cost = float(event.get("cost", 0))
-                    elif "usage" in event and isinstance(event["usage"], dict):
-                        cost = float(event["usage"].get("cost", 0))
-
-                    # Get tokens
-                    prompt_tokens = int(event.get("prompt_tokens", 0) or 0)
-                    completion_tokens = int(event.get("completion_tokens", 0) or 0)
-                    cached_tokens = int(event.get("cached_tokens", 0) or 0)
-
-                    if model not in breakdown:
-                        breakdown[model] = {"cost": 0.0, "calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0}
-
-                    breakdown[model]["cost"] += cost
-                    breakdown[model]["calls"] += 1
-                    breakdown[model]["prompt_tokens"] += prompt_tokens
-                    breakdown[model]["completion_tokens"] += completion_tokens
-                    breakdown[model]["cached_tokens"] += cached_tokens
-
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    continue
-    except Exception:
-        log.warning("Failed to calculate model breakdown", exc_info=True)
-
-    return breakdown
-
-
-def per_task_cost_summary(max_tasks: int = 10, tail_bytes: int = 512_000) -> List[Dict[str, Any]]:
-    """Return cost summary for recent tasks from events.jsonl.
-
-    Only reads the last `tail_bytes` of the file to avoid scanning
-    megabytes of history on every LLM round.
-
-    Returns list of dicts: [{task_id, cost, rounds, model}, ...]
-    sorted by cost descending, limited to max_tasks.
-    """
-    events_path = DRIVE_ROOT / "logs" / "events.jsonl"
-    if not events_path.exists():
-        return []
-
-    tasks: Dict[str, Dict[str, Any]] = {}
-    try:
-        file_size = events_path.stat().st_size
-        with events_path.open("r", encoding="utf-8") as f:
-            if file_size > tail_bytes:
-                f.seek(file_size - tail_bytes)
-                f.readline()  # skip partial first line
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                    if event.get("type") != "llm_usage":
-                        continue
-                    tid = event.get("task_id") or "unknown"
-                    cost = float(event.get("cost", 0) or 0)
-                    if tid not in tasks:
-                        tasks[tid] = {"task_id": tid, "cost": 0.0, "rounds": 0, "model": event.get("model", "")}
-                    tasks[tid]["cost"] += cost
-                    tasks[tid]["rounds"] += 1
-                except (json.JSONDecodeError, ValueError, TypeError):
-                    continue
-    except Exception:
-        log.warning("Failed to calculate per-task cost summary", exc_info=True)
-
-    sorted_tasks = sorted(tasks.values(), key=lambda x: x["cost"], reverse=True)
-    return sorted_tasks[:max_tasks]
-
-
-# ---------------------------------------------------------------------------
-# Status text (moved from workers.py)
-# ---------------------------------------------------------------------------
-
-def status_text(workers_dict: Dict[int, Any], pending_list: list, running_dict: Dict[str, Dict[str, Any]],
-                soft_timeout_sec: int, hard_timeout_sec: int) -> str:
-    """Build status text from worker and queue state."""
+def status_text() -> str:
     st = load_state()
-    now = time.time()
-    lines = []
-    lines.append(f"owner_id: {st.get('owner_id')}")
-    lines.append(f"session_id: {st.get('session_id')}")
-    lines.append(f"version: {st.get('current_branch')}@{(st.get('current_sha') or '')[:8]}")
-    busy_count = sum(1 for w in workers_dict.values() if getattr(w, 'busy_task_id', None) is not None)
-    lines.append(f"workers: {len(workers_dict)} (busy: {busy_count})")
-    lines.append(f"pending: {len(pending_list)}")
-    lines.append(f"running: {len(running_dict)}")
-    if pending_list:
-        preview = []
-        for t in pending_list[:10]:
-            preview.append(
-                f"{t.get('id')}:{t.get('type')}:pr{t.get('priority')}:a{int(t.get('_attempt') or 1)}")
-        lines.append("pending_queue: " + ", ".join(preview))
-    if running_dict:
-        lines.append("running_ids: " + ", ".join(list(running_dict.keys())[:10]))
-    busy = [f"{getattr(w, 'wid', '?')}:{getattr(w, 'busy_task_id', '?')}"
-            for w in workers_dict.values() if getattr(w, 'busy_task_id', None)]
-    if busy:
-        lines.append("busy: " + ", ".join(busy))
-    if running_dict:
-        details = []
-        for task_id, meta in list(running_dict.items())[:10]:
-            task = meta.get("task") if isinstance(meta, dict) else {}
-            started = float(meta.get("started_at") or 0.0) if isinstance(meta, dict) else 0.0
-            hb = float(meta.get("last_heartbeat_at") or 0.0) if isinstance(meta, dict) else 0.0
-            runtime_sec = int(max(0.0, now - started)) if started > 0 else 0
-            hb_lag_sec = int(max(0.0, now - hb)) if hb > 0 else -1
-            details.append(
-                f"{task_id}:type={task.get('type')} pr={task.get('priority')} "
-                f"attempt={meta.get('attempt')} runtime={runtime_sec}s hb_lag={hb_lag_sec}s")
-        if details:
-            lines.append("running_details:")
-            lines.extend([f"  - {d}" for d in details])
-    if running_dict and busy_count == 0:
-        lines.append("queue_warning: running>0 while busy=0")
     spent = float(st.get("spent_usd") or 0.0)
-    pct = budget_pct(st)
-    budget_remaining_usd = max(0, TOTAL_BUDGET_LIMIT - spent)
-    lines.append(f"budget_total: ${TOTAL_BUDGET_LIMIT:.0f}")
-    lines.append(f"budget_remaining: ${budget_remaining_usd:.0f}")
-    if pct > 0:
-        lines.append(f"spent_usd: ${spent:.2f} ({pct:.1f}% of budget)")
-    else:
-        lines.append(f"spent_usd: ${spent:.2f}")
-    lines.append(f"spent_calls: {st.get('spent_calls')}")
-    lines.append(f"prompt_tokens: {st.get('spent_tokens_prompt')}, completion_tokens: {st.get('spent_tokens_completion')}, cached_tokens: {st.get('spent_tokens_cached')}")
+    total = float(os.environ.get("TOTAL_BUDGET", "0") or 0.0)
+    if total <= 0:
+        total = float(st.get("total_budget_limit", 0))
+    if total <= 0:
+        total = 30.0  # default display
 
-    # Add budget breakdown by category
-    breakdown = budget_breakdown(st)
-    if breakdown:
-        # Sort by cost descending
-        sorted_categories = sorted(breakdown.items(), key=lambda x: x[1], reverse=True)
-        breakdown_parts = [f"{cat}=${cost:.2f}" for cat, cost in sorted_categories if cost > 0]
-        if breakdown_parts:
-            lines.append(f"budget_breakdown: {', '.join(breakdown_parts)}")
-
-    # Display budget drift if available
-    drift_pct = st.get("budget_drift_pct")
-    if drift_pct is not None:
-        session_total_snap = st.get("session_total_snapshot")
-        session_spent_snap = st.get("session_spent_snapshot")
-        or_total = st.get("openrouter_total_usd")
-
-        if session_total_snap is not None and session_spent_snap is not None and or_total is not None:
-            or_delta = or_total - session_total_snap
-            our_delta = spent - session_spent_snap
-
-            drift_icon = " ⚠️" if st.get("budget_drift_alert") else ""
-            lines.append(
-                f"budget_drift: {drift_pct:.1f}%{drift_icon} "
-                f"(tracked: ${our_delta:.2f} vs OpenRouter: ${or_delta:.2f})"
-            )
-
-    # Model breakdown
-    models = model_breakdown(st)
-    if models:
-        sorted_models = sorted(models.items(), key=lambda x: x[1]["cost"], reverse=True)
-        lines.append("model_breakdown:")
-        for model_name, stats in sorted_models:
-            if stats["cost"] > 0 or stats["calls"] > 0:
-                cost = stats["cost"]
-                calls = int(stats["calls"])
-                pt = int(stats["prompt_tokens"])
-                ct = int(stats["completion_tokens"])
-                lines.append(f"  {model_name}: ${cost:.2f} ({calls} calls, {pt:,}p/{ct:,}c tok)")
-
-    lines.append(
-        "evolution: "
-        + f"enabled={int(bool(st.get('evolution_mode_enabled')))}, "
-        + f"cycle={int(st.get('evolution_cycle') or 0)}")
-    lines.append(f"last_owner_message_at: {st.get('last_owner_message_at') or '-'}")
-    lines.append(f"timeouts: soft={soft_timeout_sec}s, hard={hard_timeout_sec}s")
-    return "\n".join(lines)
-
-
-def rotate_chat_log_if_needed(drive_root: pathlib.Path, max_bytes: int = 800_000) -> None:
-    """Rotate chat log if it exceeds max_bytes."""
-    chat = drive_root / "logs" / "chat.jsonl"
-    if not chat.exists():
-        return
-    if chat.stat().st_size < max_bytes:
-        return
-    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
-    archive_path = drive_root / "archive" / f"chat_{ts}.jsonl"
-    archive_path.parent.mkdir(parents=True, exist_ok=True)
-    archive_path.write_bytes(chat.read_bytes())
-    chat.write_text("", encoding="utf-8")
+    pct = (spent / total) * 100 if total > 0 else 0.0
+    remaining = max(0.0, total - spent)
+    return f"💰 ${spent:.2f} / ${total:.2f} ({pct:.1f}%), rem ${remaining:.2f}"
