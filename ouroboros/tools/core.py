@@ -43,23 +43,53 @@ def _repo_list(ctx: ToolContext, dir: str = ".", max_entries: int = 500) -> str:
     return json.dumps(_list_dir(ctx.repo_dir, dir, max_entries), ensure_ascii=False, indent=2)
 
 
+# ---------------------------------------------------------------------------
+# Google Drive integration (API with filesystem fallback)
+# ---------------------------------------------------------------------------
+
 def _drive_read(ctx: ToolContext, path: str) -> str:
-    return read_text(ctx.drive_path(path))
+    """Read a text file from Google Drive.
+    Tries API first if credentials available, then falls back to local drive mount.
+    """
+    # Try Google API
+    try:
+        from ouroboros.google_api import drive_read_api
+        return drive_read_api(path)
+    except Exception as e:
+        log.debug("Google Drive API read unavailable (%s), falling back to filesystem", e)
+        return read_text(ctx.drive_path(path))
 
 
 def _drive_list(ctx: ToolContext, dir: str = ".", max_entries: int = 500) -> str:
-    return json.dumps(_list_dir(ctx.drive_root, dir, max_entries), ensure_ascii=False, indent=2)
+    """List files in a Drive directory.
+    Tries API first if credentials available, then falls back to local drive mount.
+    """
+    try:
+        from ouroboros.google_api import drive_list_api
+        names = drive_list_api(dir)
+        return json.dumps(names, ensure_ascii=False, indent=2)
+    except Exception as e:
+        log.debug("Google Drive API list unavailable (%s), falling back to filesystem", e)
+        return json.dumps(_list_dir(ctx.drive_root, dir, max_entries), ensure_ascii=False, indent=2)
 
 
 def _drive_write(ctx: ToolContext, path: str, content: str, mode: str = "overwrite") -> str:
-    p = ctx.drive_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    if mode == "overwrite":
-        p.write_text(content, encoding="utf-8")
-    else:
-        with p.open("a", encoding="utf-8") as f:
-            f.write(content)
-    return f"OK: wrote {mode} {path} ({len(content)} chars)"
+    """Write a text file to Google Drive.
+    Tries API first if credentials available, then falls back to local drive mount.
+    """
+    try:
+        from ouroboros.google_api import drive_write_api
+        return drive_write_api(path, content, mode)
+    except Exception as e:
+        log.debug("Google Drive API write unavailable (%s), falling back to filesystem", e)
+        p = ctx.drive_path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        if mode == "overwrite":
+            p.write_text(content, encoding="utf-8")
+        else:
+            with p.open("a", encoding="utf-8") as f:
+                f.write(content)
+        return f"OK: wrote {mode} {path} ({len(content)} chars)"
 
 
 # ---------------------------------------------------------------------------
@@ -375,27 +405,24 @@ def get_tools() -> List[ToolEntry]:
         }, _send_photo),
         ToolEntry("codebase_digest", {
             "name": "codebase_digest",
-            "description": "Get a compact digest of the entire codebase: files, sizes, classes, functions. One call instead of many repo_read calls.",
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        }, _codebase_digest),
+            "description": "Get a compact digest of the entire codebase: files, sizes, classes, functions. One call instead of many repo_* calls.",
+            "parameters": {"type": "object", "properties": {}},
+            "lambda": lambda ctx: _codebase_digest(ctx),
+        }),
         ToolEntry("summarize_dialogue", {
             "name": "summarize_dialogue",
-            "description": "Summarize dialogue history into key moments, decisions, and creator preferences. Writes to memory/dialogue_summary.md.",
+            "description": "Summarize recent chat history into key decisions, creator preferences, and patterns. Writes summary to memory/dialogue_summary.md. Cost: uses OUROBOROS_MODEL_LIGHT.",
             "parameters": {"type": "object", "properties": {
-                "last_n": {"type": "integer", "description": "Number of recent messages to summarize (default 200)"},
+                "last_n": {"type": "integer", "default": 200, "description": "Number of recent messages to summarize"},
             }, "required": []},
-        }, _summarize_dialogue),
+            "lambda": lambda ctx: _summarize_dialogue(ctx, last_n=200),
+        }),
         ToolEntry("forward_to_worker", {
             "name": "forward_to_worker",
-            "description": (
-                "Forward a message to a running worker task's mailbox. "
-                "Use when the owner sends a message during your active conversation "
-                "that is relevant to a specific running background task. "
-                "The worker will see it as [Owner message during task] on its next LLM round."
-            ),
+            "description": "Forward a message to a running worker task's mailbox (LLM-initiated routing).",
             "parameters": {"type": "object", "properties": {
-                "task_id": {"type": "string", "description": "ID of the running task to forward to"},
-                "message": {"type": "string", "description": "Message text to forward"},
+                "task_id": {"type": "string"},
+                "message": {"type": "string"},
             }, "required": ["task_id", "message"]},
         }, _forward_to_worker),
     ]
