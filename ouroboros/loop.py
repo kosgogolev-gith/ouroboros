@@ -600,7 +600,7 @@ def run_llm_loop(
     budget_remaining_usd: Optional[float] = None,
     event_queue: Optional[queue.Queue] = None,
     initial_effort: str = "medium",
-    drive_root: Optional[pathlib.Path] = None,
+    drive_root: Optional[pathlib.Path] = None, initial_model: Optional[str] = None,
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
     """
     Core LLM-with-tools loop.
@@ -615,7 +615,7 @@ def run_llm_loop(
     Returns: (final_text, accumulated_usage, llm_trace)
     """
     # LLM-first: single default model, LLM switches via tool if needed
-    active_model = llm.default_model()
+    active_model = initial_model or llm.default_model()
     active_effort = initial_effort
 
     llm_trace: Dict[str, Any] = {"assistant_notes": [], "tool_calls": []}
