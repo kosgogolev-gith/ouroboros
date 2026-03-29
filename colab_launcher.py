@@ -419,7 +419,7 @@ def _handle_supervisor_command(text: str, chat_id: int, tg_offset: int = 0):
 
     # Dual-path commands: supervisor handles + LLM sees a note
     if lowered.startswith("/status"):
-        status = status_text(WORKERS, PENDING, RUNNING, SOFT_TIMEOUT_SEC, HARD_TIMEOUT_SEC)
+        status = status_text()
         send_with_budget(chat_id, status, force_budget=True)
         return "[Supervisor handled /status — status text already sent to chat]\n"
 
@@ -473,7 +473,7 @@ except Exception as e:
 
 while True:
     loop_started_ts = time.time()
-    rotate_chat_log_if_needed(DRIVE_ROOT)
+    rotate_chat_log_if_needed()
     ensure_workers_healthy()
 
     # Drain worker events
