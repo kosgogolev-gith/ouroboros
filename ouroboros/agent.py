@@ -411,6 +411,12 @@ class OuroborosAgent:
             else:
                 initial_effort = "medium"
 
+            # Choose model based on presence of image
+            if task.get("image_base64"):
+                initial_model = os.getenv("OUROBOROS_VISION_MODEL", "qwen/qwen3-vl-30b-a3b:free")
+            else:
+                initial_model = os.getenv("OUROBOROS_TEXT_MODEL", "stepfun/step-3.5-flash:free")
+
             try:
                 text, usage, llm_trace = run_llm_loop(
                     messages=messages,
@@ -424,6 +430,7 @@ class OuroborosAgent:
                     budget_remaining_usd=budget_remaining,
                     event_queue=self._event_queue,
                     initial_effort=initial_effort,
+                    initial_model=initial_model,
                     drive_root=self.env.drive_root,
                 )
             except Exception as e:
