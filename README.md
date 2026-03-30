@@ -1,6 +1,6 @@
 # Ouroboros — self-creating agent
 
-**Version:** 6.3.3
+**Version:** 6.3.4
 
 ...
 
