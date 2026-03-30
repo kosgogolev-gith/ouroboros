@@ -583,9 +583,19 @@ while True:
         if agent._busy:
             # BUSY PATH: inject into active conversation (single consumer)
             if image_data:
-                if text:
-                    agent.inject_message(text)
-                send_with_budget(chat_id, "📎 Photo received, but a task is in progress. Send again when I'm free.")
+                task = {
+                    "id": uuid.uuid4().hex[:8],
+                    "type": "task",
+                    "chat_id": chat_id,
+                    "text": text or "",
+                    "_is_direct_chat": True,
+                }
+                task["image_base64"] = image_data[0]
+                task["image_mime"] = image_data[1]
+                if len(image_data) > 2 and image_data[2]:
+                    task["image_caption"] = image_data[2]
+                enqueue_task(task)
+                send_with_budget(chat_id, "📎 Фото получено. Поставлено в очередь — обработаю, как освобожусь.")
             elif text:
                 agent.inject_message(text)
 
@@ -660,10 +670,22 @@ while True:
 
             # Re-check if agent became busy during batch window (race condition fix)
             if agent._busy:
-                if final_text:
-                    agent.inject_message(final_text)
                 if _batched_image:
-                    send_with_budget(chat_id, "📎 Photo received, but a task is in progress. Send again when I'm free.")
+                    task = {
+                        "id": uuid.uuid4().hex[:8],
+                        "type": "task",
+                        "chat_id": chat_id,
+                        "text": final_text or "",
+                        "_is_direct_chat": True,
+                    }
+                    task["image_base64"] = _batched_image[0]
+                    task["image_mime"] = _batched_image[1]
+                    if len(_batched_image) > 2 and _batched_image[2]:
+                        task["image_caption"] = _batched_image[2]
+                    enqueue_task(task)
+                    send_with_budget(chat_id, "📎 Фото получено. Поставлено в очередь — обработаю, как освобожусь.")
+                elif final_text:
+                    agent.inject_message(final_text)
             else:
                 # Dispatch to direct chat handler
                 _consciousness.pause()
