@@ -588,6 +588,17 @@ def _drain_incoming_messages(
                     pass
 
 
+def _messages_contain_images(messages: List[Dict[str, Any]]) -> bool:
+    """Check if any message contains image_url content (multimodal vision input)."""
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image_url":
+                    return True
+    return False
+
+
 def run_llm_loop(
     messages: List[Dict[str, Any]],
     tools: ToolRegistry,
@@ -699,10 +710,18 @@ def run_llm_loop(
             # Fallback to another model if primary model returns empty responses
             if msg is None:
                 # Configurable fallback priority list (Bible P3: no hardcoded behavior)
-                fallback_list_raw = os.environ.get(
-                    "OUROBOROS_MODEL_FALLBACK_LIST",
-                    "google/gemini-2.5-pro-preview,openai/o3,anthropic/claude-sonnet-4.6"
-                )
+                # Use VLM-capable fallbacks when messages contain images
+                if _messages_contain_images(messages):
+                    fallback_list_raw = os.environ.get(
+                        "OUROBOROS_VISION_MODEL_FALLBACK_LIST",
+                        "anthropic/claude-sonnet-4.6,google/gemini-2.5-pro-preview,openai/gpt-4.1"
+                    )
+                    log.info("Using VLM-specific fallback list (messages contain images)")
+                else:
+                    fallback_list_raw = os.environ.get(
+                        "OUROBOROS_MODEL_FALLBACK_LIST",
+                        "google/gemini-2.5-pro-preview,openai/o3,anthropic/claude-sonnet-4.6"
+                    )
                 fallback_candidates = [m.strip() for m in fallback_list_raw.split(",") if m.strip()]
                 fallback_model = None
                 for candidate in fallback_candidates:
@@ -716,7 +735,8 @@ def run_llm_loop(
                     ), accumulated_usage, llm_trace
 
                 # Emit progress message so user sees fallback happening
-                fallback_progress = f"⚡ Fallback: {active_model} → {fallback_model} after empty response"
+                has_images = _messages_contain_images(messages)
+                fallback_progress = f"⚡ Fallback: {active_model} → {fallback_model} after empty response" + (" (VLM)" if has_images else "")
                 emit_progress(fallback_progress)
 
                 # Try fallback model (don't increment round_idx — this is still same logical round)
