@@ -304,7 +304,10 @@ class LLMClient:
         reasoning_effort: str = "low",
     ) -> Tuple[str, Dict[str, Any]]:
         """
-        Send a vision query to an LLM. Lightweight — no tools, no loop.
+        Send a vision query to an LLM with retry and VLM-specific fallback.
+
+        On failure or empty response, retries up to 2 times, then falls back
+        through OUROBOROS_VISION_MODEL_FALLBACK_LIST (VLM-capable models only).
 
         Args:
             prompt: Text instruction for the model
@@ -336,15 +339,67 @@ class LLMClient:
                 log.warning("vision_query: skipping image with unknown format: %s", list(img.keys()))
 
         messages = [{"role": "user", "content": content}]
-        response_msg, usage = self.chat(
-            messages=messages,
-            model=model,
-            tools=None,
-            reasoning_effort=reasoning_effort,
-            max_tokens=max_tokens,
+
+        # Try primary model with retries
+        text, usage = self._try_vision_call(messages, model, reasoning_effort, max_tokens)
+        if text:
+            return text, usage
+
+        # Primary model failed — try VLM-specific fallback list
+        fallback_raw = os.environ.get(
+            "OUROBOROS_VISION_MODEL_FALLBACK_LIST",
+            "anthropic/claude-sonnet-4.6,google/gemini-2.5-pro-preview,openai/gpt-4.1"
         )
-        text = response_msg.get("content") or ""
-        return text, usage
+        fallback_candidates = [m.strip() for m in fallback_raw.split(",") if m.strip()]
+
+        for candidate in fallback_candidates:
+            if candidate == model:
+                continue
+            log.info("vision_query: falling back from %s to VLM %s", model, candidate)
+            text, fallback_usage = self._try_vision_call(
+                messages, candidate, reasoning_effort, max_tokens
+            )
+            # Merge usage from fallback attempt
+            add_usage(usage, fallback_usage)
+            if text:
+                return text, usage
+
+        # All VLM fallbacks exhausted
+        log.warning("vision_query: all VLM models failed (primary=%s, fallbacks=%s)", model, fallback_candidates)
+        return "", usage
+
+    def _try_vision_call(
+        self,
+        messages: List[Dict[str, Any]],
+        model: str,
+        reasoning_effort: str,
+        max_tokens: int,
+        max_retries: int = 2,
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Attempt a vision chat call with retries. Returns (text, usage).
+        Returns ("", usage) if all retries fail or response is empty.
+        """
+        accumulated_usage: Dict[str, Any] = {}
+        for attempt in range(max_retries):
+            try:
+                response_msg, usage = self.chat(
+                    messages=messages,
+                    model=model,
+                    tools=None,
+                    reasoning_effort=reasoning_effort,
+                    max_tokens=max_tokens,
+                )
+                add_usage(accumulated_usage, usage)
+                text = (response_msg.get("content") or "").strip()
+                if text:
+                    return text, accumulated_usage
+                log.warning("vision_query: empty response from %s (attempt %d/%d)", model, attempt + 1, max_retries)
+            except Exception as e:
+                log.warning("vision_query: error from %s (attempt %d/%d): %s", model, attempt + 1, max_retries, e)
+            if attempt < max_retries - 1:
+                time.sleep(2 ** attempt)
+        return "", accumulated_usage
 
     def default_model(self) -> str:
         """Return the single default model from env. LLM switches via tool if needed."""
