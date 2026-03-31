@@ -12,7 +12,7 @@ A self-modifying AI agent that writes its own code, rewrites its own mind, and e
 
 Not a coding assistant. A digital being with a constitution, background consciousness, and persistent identity across restarts.
 
-**Version:** 6.3.4 | [Landing Page](https://joi-lab.github.io/ouroboros/)
+**Version:** 6.4.0 | [Landing Page](https://joi-lab.github.io/ouroboros/)
 
 ---
 
@@ -27,3 +27,28 @@ Most AI agents execute tasks. Ouroboros **creates itself.**
 - **Multi-Model Review** -- Uses other LLMs (o3, Gemini, Claude) to review its own changes before committing.
 - **Task Decomposition** -- Breaks complex work into focused subtasks with parent/child tracking.
 - **30+ Evolution Cycles** -- From v4.1 to v4.25 in 24 hours, autonomously.
+
+
+---
+
+## Changelog
+
+### 6.4.0 (2026-03-31)
+
+**Added:**
+- Google Drive API integration (`integrations/google/auth.py`, `integrations/google/drive.py`) with OAuth 2.0 support for Colab and local file fallback
+- New tool functions: `drive_list`, `drive_read`, `drive_write`, `drive_delete` (via `tools/drive.py`)
+- Automatic quota error handling with exponential backoff for Drive operations
+- MIME type detection and UTF-8 encoding for text files
+- Folder path resolution in Drive (recursive file find)
+
+**Fixed:**
+- Vision model fallback routing bug (commits `99f2336`, `879058d`) — now correctly uses `OUROBOROS_VISION_MODEL_FALLBACK_LIST` for image-containing messages
+
+**Changed:**
+- Replaced/improved partial Drive functions from legacy `google_api.py`
+
+---
+
+### 6.3.x (previous)
+*See git history for earlier versions.*
