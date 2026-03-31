@@ -11,12 +11,13 @@ Handles path resolution, MIME types, and retry logic for quota errors.
 
 import os
 import time
+from io import BytesIO
 from pathlib import Path
 from typing import Optional, Tuple
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 
 from .auth import authenticate
 
@@ -232,7 +233,6 @@ def read_file(path: str) -> str:
 
     # Download content
     request = service.files().get_media(fileId=file_id)
-    from io import BytesIO
     fh = BytesIO()
     downloader = MediaIoBaseDownload(fh, request)
     done = False
@@ -306,8 +306,10 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
     except FileNotFoundError:
         pass  # Will create new file
 
-    media = MediaFileUpload(
-        None,  # We'll provide content directly
+    # Prepare content bytes
+    content_bytes = content.encode("utf-8")
+    media = MediaIoBaseUpload(
+        BytesIO(content_bytes),
         mimetype=mime_type,
         resumable=True,
     )
@@ -319,19 +321,20 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
             media_body=media,
             body={"name": file_name},
         )
-        # MediaFileUpload needs a file-like object; we'll patch it
-        media.stream = content.encode("utf-8")
-        media.mimetype = mime_type
         file = _execute_with_retry(request, operation="update file")
         action = "updated"
     elif existing_file_id and mode == "append":
         # Read existing content, append, then update
         existing_content = read_file(path)
         new_content = existing_content + content
-        media.stream = new_content.encode("utf-8")
+        new_media = MediaIoBaseUpload(
+            BytesIO(new_content.encode("utf-8")),
+            mimetype=mime_type,
+            resumable=True,
+        )
         request = service.files().update(
             fileId=existing_file_id,
-            media_body=media,
+            media_body=new_media,
             body={"name": file_name},
         )
         file = _execute_with_retry(request, operation="append to file")
@@ -348,7 +351,6 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
             media_body=media,
             fields="id, name, modifiedTime",
         )
-        media.stream = content.encode("utf-8")
         file = _execute_with_retry(request, operation="create file")
         action = "created"
 
@@ -375,8 +377,7 @@ def delete_file(path: str) -> bool:
     """
     service = _get_service()
     file_id = _get_file_id(path)
-    # For folders, _get_file_id also works if we search by name and parent,
-    # but we need to allow mimeType = folder. We'll adjust by trying to get metadata first.
+    # Check if it's a folder
     try:
         file = _execute_with_retry(
             service.files().get(fileId=file_id, fields="mimeType"),
@@ -389,8 +390,7 @@ def delete_file(path: str) -> bool:
             raise FileNotFoundError(f"File not found: {path}")
         raise
 
-    # For folders, also need to recursively delete contents? Drive API deletion of folder
-    # automatically deletes all children. So we can just delete the folder.
+    # Delete file or folder (Drive recursively deletes folder contents)
     _execute_with_retry(
         service.files().delete(fileId=file_id),
         operation="delete file/folder"
