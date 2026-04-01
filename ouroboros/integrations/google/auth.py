@@ -117,3 +117,7 @@ def get_credentials() -> Credentials:
         "or place credentials.json in /content/ouroboros_repo/ or /content/ouroboros_data/ "
         "and complete OAuth flow."
     )
+
+
+# Alias for backward compatibility with modules that import 'authenticate'
+authenticate = get_credentials
