@@ -21,7 +21,6 @@ try:
         send_message,
         modify_labels,
         search_messages,
-        GmailError,
     )
     INTEGRATIONS_AVAILABLE = True
 except ImportError as e:
@@ -38,17 +37,13 @@ def _retry_with_backoff(func, max_attempts: int = 3, initial_delay: float = 1.0)
     for attempt in range(max_attempts):
         try:
             return func()
-        except GmailError as e:
-            if "quota" in str(e).lower() or "rate limit" in str(e).lower():
-                last_exception = e
-                if attempt < max_attempts - 1:
-                    time.sleep(delay)
-                    delay *= 2
-                    continue
-                raise
-            else:
-                raise
         except Exception as e:
+            # Generic retry on any exception (conservative)
+            last_exception = e
+            if attempt < max_attempts - 1:
+                time.sleep(delay)
+                delay *= 2
+                continue
             raise
     if last_exception:
         raise last_exception
@@ -60,8 +55,7 @@ def _get_gmail_service(ctx: ToolContext):
     """Get authenticated Gmail service, or raise if unavailable."""
     if not INTEGRATIONS_AVAILABLE:
         raise RuntimeError("Gmail integrations not installed or failed to import")
-    creds = get_credentials()
-    return get_gmail_service(creds)
+    return get_gmail_service()  # Already cached internally
 
 
 # --- Tool implementations ---
