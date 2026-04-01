@@ -7,7 +7,7 @@ Provides unified access to Google services:
 - gmail: Gmail email operations
 """
 
-from .auth import authenticate, get_credentials
+from .auth import get_credentials
 from .drive import (
     list_files as drive_list,
     read_file as drive_read,
@@ -33,7 +33,6 @@ from .gmail import (
 
 __all__ = [
     # Auth
-    "authenticate",
     "get_credentials",
     # Drive
     "drive_list",
