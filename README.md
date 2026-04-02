@@ -1,5 +1,19 @@
 ## Changelog
 
+### 6.4.2 (2026-04-02)
+
+**Added:**
+- GitHub REST API integration (`integrations/github.py`) — direct access to GitHub Issues without gh CLI dependency
+- New tool functions: `list_github_issues`, `get_github_issue`, `comment_on_issue`, `create_github_issue`, `close_github_issue` (via `tools/github.py`)
+- Automatic repository detection from git remote or `GH_REPO` environment variable
+- Authentication via `GITHUB_TOKEN` environment variable
+- Rate limit handling and proper error reporting
+- Pagination support for listing issues
+
+**Changed:**
+- Replaced `gh` CLI calls with direct GitHub API calls in `tools/github.py`
+- Improved reliability of GitHub issue access in environments without gh CLI
+
 ### 6.4.1 (2026-04-01)
 
 **Added:**
