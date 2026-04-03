@@ -35,7 +35,7 @@ def _list_dir(root: pathlib.Path, rel: str, max_entries: int = 500) -> List[str]
             suffix = "/" if entry.is_dir() else ""
             items.append(str(entry.relative_to(root)) + suffix)
     except Exception as e:
-        items.append(f"⚠️ Error listing: {e}")
+        items.append(f"⚠️ Error listing: {e}"]
     return items
 
 
@@ -75,8 +75,8 @@ def _drive_read(ctx: ToolContext, path: str) -> str:
     """
     # Try Google API
     try:
-        from ouroboros.google_api import drive_read_api
-        return drive_read_api(path)
+        from ouroboros.integrations.google.drive import read_file
+        return read_file(path)
     except Exception as e:
         log.debug("Google Drive API read unavailable (%s), falling back to filesystem", e)
         return read_text(ctx.drive_path(path))
@@ -87,8 +87,8 @@ def _drive_list(ctx: ToolContext, dir: str = ".", max_entries: int = 500) -> str
     Tries API first if credentials available, then falls back to local drive mount.
     """
     try:
-        from ouroboros.google_api import drive_list_api
-        names = drive_list_api(dir)
+        from ouroboros.integrations.google.drive import list_files
+        names = list_files(dir)
         return json.dumps(names, ensure_ascii=False, indent=2)
     except Exception as e:
         log.debug("Google Drive API list unavailable (%s), falling back to filesystem", e)
@@ -100,8 +100,8 @@ def _drive_write(ctx: ToolContext, path: str, content: str, mode: str = "overwri
     Tries API first if credentials available, then falls back to local drive mount.
     """
     try:
-        from ouroboros.google_api import drive_write_api
-        return drive_write_api(path, content, mode)
+        from ouroboros.integrations.google.drive import write_file
+        return write_file(path, content, mode)
     except Exception as e:
         log.debug("Google Drive API write unavailable (%s), falling back to filesystem", e)
         p = ctx.drive_path(path)
@@ -378,36 +378,25 @@ def get_tools() -> List[ToolEntry]:
                 "mode": {"type": "string", "enum": ["overwrite", "append"], "default": "overwrite"},
             }, "required": ["path", "content"]},
         }, _drive_write),
-        ToolEntry("send_photo", {
-            "name": "send_photo",
-            "description": (
-                "Send a base64-encoded image (PNG) to the owner's Telegram chat. "
-                "Use after browse_page(output='screenshot') or browser_action(action='screenshot'). "
-                "Pass the base64 string from the screenshot result as image_base64."
-            ),
-            "parameters": {"type": "object", "properties": {
-                "image_base64": {"type": "string", "description": "Base64-encoded PNG image data"},
-                "caption": {"type": "string", "description": "Optional caption for the photo"},
-            }, "required": ["image_base64"]},
-        }, _send_photo),
-        ToolEntry("codebase_digest", {
+       ToolEntry("codebase_digest", {
             "name": "codebase_digest",
-            "description": "Get a compact digest of the entire codebase: files, sizes, classes, functions. One call instead of many repo_* calls.",
-            "parameters": {"type": "object", "properties": {}},
+            "description": "Generate a compact digest of the codebase: files, sizes, classes, functions.",
+            "parameters": {"type": "object", "properties": {},
+        }, "required": []},
         }, _codebase_digest),
-        ToolEntry("summarize_dialogue", {
+               ToolEntry("summarize_dialogue", {
             "name": "summarize_dialogue",
             "description": "Summarize recent chat history into key decisions, creator preferences, and patterns. Writes summary to memory/dialogue_summary.md. Cost: uses OUROBOROS_MODEL_LIGHT.",
             "parameters": {"type": "object", "properties": {
-                "last_n": {"type": "integer", "default": 200, "description": "Number of recent messages to summarize"},
+                "last_n": {"type": "integer", "default": 200},
             }, "required": []},
         }, _summarize_dialogue),
-        ToolEntry("forward_to_worker", {
+         ToolEntry("forward_to_worker", {
             "name": "forward_to_worker",
-            "description": "Forward a message to a running worker task's mailbox (LLM-initiated routing).",
+            "description": "Forward a message to a running worker task's mailbox.",
             "parameters": {"type": "object", "properties": {
                 "task_id": {"type": "string"},
                 "message": {"type": "string"},
-            }, "required": ["task_id", "message"]},
+            }, "required":  ["task_id", "message"]},
         }, _forward_to_worker),
     ]
