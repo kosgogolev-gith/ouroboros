@@ -59,9 +59,9 @@ class TestGoogleAPIStructure(unittest.TestCase):
 
     def test_tool_registration(self):
         """Google tools are registered in the global tool registry."""
-        from ouroboros.tools.registry import get_registry
+        from ouroboros.tools import ToolRegistry
         import pathlib
-        registry = get_registry(
+        registry = ToolRegistry(
             repo_dir=pathlib.Path('/content/ouroboros_repo'),
             drive_root=pathlib.Path('/content/ouroboros_data')
         )
