@@ -106,7 +106,7 @@ def check_version_invariants() -> List[str]:
         errors.append(f"Git tag check failed: {e}")
 
     # Check README
-    readme_path = REPO_DIR / "README.md" if REPO_DIR.exists() else pathlib.Path("README.md") if REPO_DIR.exists() else pathlib.Path("README.md")
+    readme_path = REPO_DIR / "README.md" if REPO_DIR.exists() else pathlib.Path("README.md")
     if readme_path.exists():
         try:
             readme_version = extract_version_from_changelog(readme_path)
