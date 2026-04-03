@@ -23,6 +23,14 @@ SCOPES = [
 # Token storage location
 TOKEN_PATH = pathlib.Path('/content/ouroboros_data/tokens/google_token.json')
 
+class GoogleAuthClient:
+    """Wrapper for Google API authentication."""
+    def __init__(self):
+        self.creds = get_credentials()
+
+    def get_credentials(self) -> Credentials:
+        return self.creds
+
 
 def _ensure_token_dir() -> None:
     """Ensure token directory exists."""
@@ -100,8 +108,7 @@ def get_credentials() -> Credentials:
     1. Colab authentication (if running in Colab)
     2. OAuth file-based flow (credentials.json + cached token)
     Raises RuntimeError if no credentials could be obtained.
-    """
-    creds = _get_colab_credentials()
+    """n    creds = _get_colab_credentials()
     if creds:
         log.info("Using Colab credentials")
         return creds
