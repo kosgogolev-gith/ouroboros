@@ -35,7 +35,7 @@ def _list_dir(root: pathlib.Path, rel: str, max_entries: int = 500) -> List[str]
             suffix = "/" if entry.is_dir() else ""
             items.append(str(entry.relative_to(root)) + suffix)
     except Exception as e:
-        items.append(f"⚠️ Error listing: {e}")
+        items.append(f"⚠️ Error listing: {e}"])
     return items
 
 
