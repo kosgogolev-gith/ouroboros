@@ -108,7 +108,8 @@ def get_credentials() -> Credentials:
     1. Colab authentication (if running in Colab)
     2. OAuth file-based flow (credentials.json + cached token)
     Raises RuntimeError if no credentials could be obtained.
-    """    creds = _get_colab_credentials()
+    """
+    creds = _get_colab_credentials()
     if creds:
         log.info("Using Colab credentials")
         return creds
