@@ -30,7 +30,7 @@ def _list_dir(root: pathlib.Path, rel: str, max_entries: int = 500) -> List[str]
     try:
         for entry in sorted(target.iterdir()):
             if len(items) >= max_entries:
-                items.append(f"...(truncated at {max_entries})")
+                items.append(f"...(truncated at {max_entries})"]
                 break
             suffix = "/" if entry.is_dir() else ""
             items.append(str(entry.relative_to(root)) + suffix)
@@ -378,25 +378,32 @@ def get_tools() -> List[ToolEntry]:
                 "mode": {"type": "string", "enum": ["overwrite", "append"], "default": "overwrite"},
             }, "required": ["path", "content"]},
         }, _drive_write),
-       ToolEntry("codebase_digest", {
+        ToolEntry("send_photo", {
+            "name": "send_photo",
+            "description": "Send a base64-encoded image to the owner's Telegram chat.",
+            "parameters": {"type": "object", "properties": {
+                "image_base64": {"type": "string"},
+                "caption": {"type": "string", "default": ""},
+            }, "required": ["image_base64"]},
+        }, _send_photo),
+        ToolEntry("codebase_digest", {
             "name": "codebase_digest",
             "description": "Generate a compact digest of the codebase: files, sizes, classes, functions.",
-            "parameters": {"type": "object", "properties": {},
-        }, "required": []},
+            "parameters": {"type": "object", "properties": {}},
         }, _codebase_digest),
-               ToolEntry("summarize_dialogue", {
+        ToolEntry("summarize_dialogue", {
             "name": "summarize_dialogue",
-            "description": "Summarize recent chat history into key decisions, creator preferences, and patterns. Writes summary to memory/dialogue_summary.md. Cost: uses OUROBOROS_MODEL_LIGHT.",
+            "description": "Summarize recent chat history into key decisions, creator preferences, and patterns. Writes summary to memory/dialogue_summary.md.",
             "parameters": {"type": "object", "properties": {
-                "last_n": {"type": "integer", "default": 200},
+                "last_n": {"type": "integer", "default": 200}
             }, "required": []},
         }, _summarize_dialogue),
-         ToolEntry("forward_to_worker", {
+        ToolEntry("forward_to_worker", {
             "name": "forward_to_worker",
             "description": "Forward a message to a running worker task's mailbox.",
             "parameters": {"type": "object", "properties": {
                 "task_id": {"type": "string"},
                 "message": {"type": "string"},
-            }, "required":  ["task_id", "message"]},
+            }, "required": ["task_id", "message"]},
         }, _forward_to_worker),
     ]
