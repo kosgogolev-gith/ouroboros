@@ -7,7 +7,7 @@ Built on top of the google-api-python-client with proper authentication.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
 from .auth import authenticate
@@ -60,7 +60,7 @@ def _parse_datetime(dt_str: Union[str, datetime]) -> str:
     if isinstance(dt_str, datetime):
         # If naive datetime, assume UTC
         if dt_str.tzinfo is None:
-            dt_str = dt_str.replace(tzinfo=datetime.timezone.utc)
+            dt_str = dt_str.replace(tzinfo=timezone.utc)
         return dt_str.isoformat()
     # String input - ensure it's RFC3339 compliant
     # Calendar API expects RFC3339, e.g., "2024-03-20T10:00:00Z" or with timezone offset

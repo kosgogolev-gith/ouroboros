@@ -11,13 +11,14 @@ repo и runtime.
 systemd таймер.
 """
 
+import json
 import os
 import sys
 import time
 import subprocess
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from .sync import (
     REPO_DIR,
