@@ -21,16 +21,35 @@ log = logging.getLogger(__name__)
 
 
 def get_version_from_file() -> str:
-    """Read VERSION file from repo."""
-    version_path = REPO_DIR / "VERSION"
-    if not version_path.exists():
-        raise FileNotFoundError(f"VERSION file not found in {REPO_DIR}")
-    return version_path.read_text().strip()
+    """Read VERSION file from repo. Falls back to CWD if REPO_DIR doesn't exist yet."""
+    # REPO_DIR may still point to Colab default before git_ops_init() is called.
+    # Try REPO_DIR first, then fall back to CWD (the runtime directory).
+    candidates = [REPO_DIR, pathlib.Path(".")]
+    for base in candidates:
+        version_path = base / "VERSION"
+        if version_path.exists():
+            return version_path.read_text().strip()
+    raise FileNotFoundError(
+        f"VERSION file not found in {REPO_DIR} or CWD ({pathlib.Path('.').resolve()})"
+    )
 
 
 def get_latest_git_tag() -> str:
     """Get the most recent annotated or lightweight tag matching vX.Y.Z."""
-    rc, out, err = git_capture(["git", "tag", "--list", "v*", "--sort=-creatordate"])
+    import subprocess
+    # git_capture uses REPO_DIR; if it doesn't exist yet, run from CWD instead
+    if not REPO_DIR.exists():
+        try:
+            r = subprocess.run(
+                ["git", "tag", "--list", "v*", "--sort=-creatordate"],
+                cwd=str(pathlib.Path(".").resolve()),
+                capture_output=True, text=True
+            )
+            rc, out, err = r.returncode, r.stdout, r.stderr
+        except Exception as e:
+            raise RuntimeError(f"git tag failed (CWD fallback): {e}")
+    else:
+        rc, out, err = git_capture(["git", "tag", "--list", "v*", "--sort=-creatordate"])
     if rc != 0:
         raise RuntimeError(f"git tag failed: {err}")
     lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
@@ -87,7 +106,7 @@ def check_version_invariants() -> List[str]:
         errors.append(f"Git tag check failed: {e}")
 
     # Check README
-    readme_path = REPO_DIR / "README.md"
+    readme_path = REPO_DIR / "README.md" if REPO_DIR.exists() else pathlib.Path("README.md") if REPO_DIR.exists() else pathlib.Path("README.md")
     if readme_path.exists():
         try:
             readme_version = extract_version_from_changelog(readme_path)
