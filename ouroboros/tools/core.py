@@ -30,7 +30,7 @@ def _list_dir(root: pathlib.Path, rel: str, max_entries: int = 500) -> List[str]
     try:
         for entry in sorted(target.iterdir()):
             if len(items) >= max_entries:
-                items.append(f"...(truncated at {max_entries})"]
+                items.append(f"...(truncated at {max_entries})")
                 break
             suffix = "/" if entry.is_dir() else ""
             items.append(str(entry.relative_to(root)) + suffix)
@@ -45,4 +45,3 @@ def _extract_python_symbols(file_path: pathlib.Path) -> Tuple[List[str], List[st
         code = file_path.read_text(encoding="utf-8")
         tree = ast.parse(code, filename=str(file_path))
         classes = []
-... (truncated from 16305 chars)
