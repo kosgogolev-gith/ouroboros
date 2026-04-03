@@ -266,7 +266,7 @@ def fix_version_mismatch(dry_run: bool = False) -> Dict:
             elif fix["file"] == "README.md":
                 # В README ищем строку с версией в changelog и заменяем
                 import re
-                pattern = rf'(?##|###)\s+v?(\d+\.\d+\.\d+)'
+                pattern = rf'(?:##|###)\s+v?(\d+\.\d+\.\d+)'
                 new_content = re.sub(pattern, rf'\1 v{master_version}', content, count=1)
             else:
                 # Для VERSION — просто перезаписываем

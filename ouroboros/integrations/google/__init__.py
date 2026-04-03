@@ -9,10 +9,10 @@ Provides unified access to Google services:
 
 from .auth import get_credentials
 from .drive import (
-    list_files as drive_list,
-    read_file as drive_read,
-    write_file as drive_write,
-    delete_file as drive_delete,
+    list_files,
+    read_file,
+    write_file,
+    delete_file,
 )
 from .calendar import (
     get_calendar_service,
@@ -35,10 +35,10 @@ __all__ = [
     # Auth
     "get_credentials",
     # Drive
-    "drive_list",
-    "drive_read",
-    "drive_write",
-    "drive_delete",
+    "list_files",
+    "read_file",
+    "write_file",
+    "delete_file",
     # Calendar
     "get_calendar_service",
     "list_events",
