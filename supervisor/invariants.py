@@ -45,7 +45,7 @@ def extract_version_from_changelog(readme_path: pathlib.Path) -> str:
     content = readme_path.read_text(encoding="utf-8")
     # Look for "## [X.Y.Z]" - typical markdown heading for a version
     # Or "### X.Y.Z" etc. We'll match lines like "## [1.2.3]" or "## 1.2.3"
-    pattern = re.compile(r"^##\s*\[?(\d+\.\d+\.\d+)\]?", re.MULTILINE)
+    pattern = re.compile(r"^#{2,}\s*\[?(\d+\.\d+\.\d+)\]?", re.MULTILINE)
     match = pattern.search(content)
     if match:
         return match.group(1)
