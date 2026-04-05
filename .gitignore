@@ -26,4 +26,23 @@ Thumbs.db
 
 # Release artifacts (not tracked)
 .create_release.py
-.release_notes.md
+.release_notes.md# Junk directories created by shell command mishaps
+$HOME/
+&&/
+[0-9]*/
+chmod/
+cp/
+home/
+memory/
+mkdir/
+sudo/
+ln/
+rm/
+rclone*/
+*.bak
+test_ouroboros.py
+test_results.xml
+.venv/
+venv/
+__pycache__/
+*.pyc
