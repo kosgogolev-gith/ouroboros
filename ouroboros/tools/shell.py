@@ -62,6 +62,30 @@ def _run_shell(ctx: ToolContext, cmd, cwd: str = "") -> str:
         return "⚠️ SHELL_ARG_ERROR: cmd must be a list of strings."
     cmd = [str(x) for x in cmd]
 
+    # Expand shell variables in args (prevents literal $HOME/ directory creation)
+    SHELL_VARS = {
+        "$HOME": str(pathlib.Path.home()),
+        "$USER": os.getenv("USER", "goga"),
+        "~": str(pathlib.Path.home()),
+    }
+    SHELL_OPERATORS = {"&&", "||", "|", ";"}
+
+    expanded_cmd = []
+    for arg in cmd:
+        for var, val in SHELL_VARS.items():
+            arg = arg.replace(var, val)
+        expanded_cmd.append(arg)
+
+    # Detect shell operators passed as list items (should use bash -c instead)
+    for arg in expanded_cmd:
+        if arg.strip() in SHELL_OPERATORS:
+            return (
+                f"⚠️ SHELL_ARG_ERROR: shell operator '{arg}' in cmd list. "
+                f"Use ['bash', '-c', '...'] for complex commands."
+            )
+
+    cmd = expanded_cmd
+
     work_dir = ctx.repo_dir
     if cwd and cwd.strip() not in ("", ".", "./"):
         candidate = (ctx.repo_dir / cwd).resolve()
