@@ -14,6 +14,7 @@ from ouroboros.tools.registry import ToolEntry, ToolContext
 log = logging.getLogger(__name__)
 
 KNOWLEDGE_DIR = "memory/knowledge"
+REQUIREMENTS_DIR = "knowledge/requirements"
 INDEX_FILE = "_index.md"
 
 # --- Sanitization ---
@@ -257,6 +258,68 @@ def _knowledge_list(ctx: ToolContext) -> str:
     return "Knowledge base is empty. Use knowledge_write to add topics."
 
 
+# --- Requirements handlers ---
+
+_VALID_PROJECT = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,98}[a-zA-Z0-9]$|^[a-zA-Z0-9]$')
+
+
+def _sanitize_project(project: str) -> str:
+    """Validate project name for requirements storage."""
+    if not project or not isinstance(project, str):
+        raise ValueError("Project must be a non-empty string")
+    project = project.strip()
+    if '/' in project or '\\' in project or '..' in project:
+        raise ValueError(f"Invalid characters in project name: {project}")
+    if not _VALID_PROJECT.match(project):
+        raise ValueError(f"Invalid project name: {project}. Use alphanumeric, underscore, hyphen, dot.")
+    return project
+
+
+def _requirements_save(ctx: ToolContext, project: str, requirements: str) -> str:
+    """Save project requirements to knowledge base."""
+    try:
+        sanitized = _sanitize_project(project)
+    except ValueError as e:
+        return f"\u26a0\ufe0f Invalid project name: {e}"
+
+    req_dir = ctx.drive_path(REQUIREMENTS_DIR)
+    req_dir.mkdir(parents=True, exist_ok=True)
+
+    path = req_dir / f"{sanitized}.md"
+    # Verify containment
+    try:
+        path.resolve().relative_to(req_dir.resolve())
+    except ValueError:
+        return f"\u26a0\ufe0f Path escape detected: {project}"
+
+    path.write_text(requirements, encoding="utf-8")
+    return f"\u2705 Requirements for project '{sanitized}' saved ({len(requirements)} chars)."
+
+
+def _requirements_load(ctx: ToolContext, project: str) -> str:
+    """Load saved requirements for a project."""
+    try:
+        sanitized = _sanitize_project(project)
+    except ValueError as e:
+        return f"\u26a0\ufe0f Invalid project name: {e}"
+
+    req_dir = ctx.drive_path(REQUIREMENTS_DIR)
+    path = req_dir / f"{sanitized}.md"
+
+    if not path.exists():
+        # List available projects
+        if req_dir.exists():
+            available = [f.stem for f in sorted(req_dir.glob("*.md"))]
+            if available:
+                return (
+                    f"Project '{sanitized}' not found. "
+                    f"Available: {', '.join(available)}"
+                )
+        return f"Project '{sanitized}' not found. No saved requirements yet."
+
+    return path.read_text(encoding="utf-8")
+
+
 # --- Tool registration ---
 
 def get_tools() -> List[ToolEntry]:
@@ -307,4 +370,41 @@ def get_tools() -> List[ToolEntry]:
                 "required": []
             },
         }, _knowledge_list),
+        ToolEntry("requirements_save", {
+            "name": "requirements_save",
+            "description": (
+                "Save project requirements (TZ/spec) for later comparison with offers. "
+                "Stored persistently on Drive under knowledge/requirements/{project}.md."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project identifier (alphanumeric, hyphens, underscores). E.g. 'sber-gpu-cluster', 'dc-expansion-2024'"
+                    },
+                    "requirements": {
+                        "type": "string",
+                        "description": "Requirements text to save (markdown format recommended)"
+                    },
+                },
+                "required": ["project", "requirements"]
+            },
+        }, _requirements_save),
+        ToolEntry("requirements_load", {
+            "name": "requirements_load",
+            "description": (
+                "Load saved requirements for a project. Use before comparing with a new KP/offer."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project": {
+                        "type": "string",
+                        "description": "Project identifier to load requirements for"
+                    },
+                },
+                "required": ["project"]
+            },
+        }, _requirements_load),
     ]
