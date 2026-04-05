@@ -30,7 +30,6 @@ Thumbs.db
 # Junk dirs from shell mishaps
 $HOME/
 &&/
-memory/
 rclone*/
 *.bak
 .venv/
