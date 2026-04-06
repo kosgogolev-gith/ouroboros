@@ -101,7 +101,7 @@ def get_tools() -> List[ToolEntry]:
                         ),
                     },
                 },
-                "required": ["requirements_text", "offer_text"],
+                "required": ['offer_text', 'requirements_sheet'],
             },
         }, _spec_compare),
     ]
