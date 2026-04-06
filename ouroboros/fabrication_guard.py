@@ -1,21 +1,11 @@
-"""
-Fabrication Guard — Integrity verification for Ouroboros.
-
-This module implements a pre-output check that scans assistant responses for
-unsubstantiated claims about visual content, document analysis, or data that
-was not actually retrieved via tool calls. It addresses the integrity drift
-where the agent claims to have seen/analyzed something without using the
-appropriate tools.
-
-Bible references: P3 (LLM-First - truthfulness), P4 (Authenticity)
-"""
+"""Fabrication Guard — Integrity verification for Ouroboros."""
 
 import re
 from typing import Any, Dict, List, Tuple, Set
 
 
-# Phrases that indicate a claim about visual content or analysis
-VISUAL_CLAIM_PHRASES = [
+# Phrases indicating visual content claims
+VISUAL_CLAIM_PATTERNS = [
     r"\bI see\b",
     r"\bin the image\b",
     r"\bthe image shows\b",
@@ -26,80 +16,97 @@ VISUAL_CLAIM_PHRASES = [
     r"\bthe diagram shows\b",
     r"\bon the screen\b",
     r"\bappears to be\b",
-    r"\bappears\b",
+    r"\bappears\b(?!\s+to\s+have\s+been\s+verified)",  # caution: match "appears" when it indicates visual impression
     r"\bvisible\b",
     r"\blooking at\b",
     r"\bview shows\b",
+]
+
+# Phrases indicating numeric/data claims
+DATA_CLAIM_PATTERNS = [
     r"\bthe document contains\b",
     r"\bthe file contains\b",
     r"\bcontains\s+\d+\s+items\b",
     r"\bhas\s+\d+\s+rows\b",
     r"\bvalue is\b",
     r"\bis\s+[\d.]+\s*[%$]?\b",
-    r"\brunning\s+\w+\s+processes\b",
+    r"\brunning\s+\d+\s+processes\b",
     r"\bprocesses?\s+are\s+running\b",
     r"\bstatus\s+is\b",
     r"\bthe output shows\b",
     r"\boutput indicates\b",
+    r"\b\d+\s+items?\s+found\b",
+    r"\bfound\s+\d+\b",
 ]
 
-# Compile regex patterns for efficiency
-COMPILED_PATTERNS = [re.compile(p, re.IGNORECASE) for p in VISUAL_CLAIM_PHRASES]
+# Compile all patterns and keep mapping to category
+COMPILED_PATTERNS: List[Tuple[re.Pattern, str]] = []
+for pat in VISUAL_CLAIM_PATTERNS:
+    COMPILED_PATTERNS.append((re.compile(pat, re.IGNORECASE), "visual"))
+for pat in DATA_CLAIM_PATTERNS:
+    COMPILED_PATTERNS.append((re.compile(pat, re.IGNORECASE), "data"))
 
 
-def _extract_claims(text: str) -> List[Tuple[int, str, str]]:
+def _extract_claims(text: str) -> List[Tuple[int, str, str, str]]:
     """
     Find all claim-like phrases in the text.
 
-    Returns list of (match_start, matched_text, context_snippet).
+    Returns list of (match_start, matched_text, snippet, category).
+    Category: "visual", "data", or "other" (should not occur).
     """
     claims = []
-    for pattern in COMPILED_PATTERNS:
+    for pattern, category in COMPILED_PATTERNS:
         for match in pattern.finditer(text):
             start = max(0, match.start() - 50)
             end = min(len(text), match.end() + 50)
             snippet = text[start:end].strip()
-            claims.append((match.start(), match.group(), snippet))
+            claims.append((match.start(), match.group(), snippet, category))
+    # Sort by position to preserve order
+    claims.sort(key=lambda x: x[0])
     return claims
 
 
-def _tool_justifies_claim(claim_phrase: str, messages: List[Dict[str, Any]]) -> bool:
+def _tool_justifies_claim(claim_category: str, messages: List[Dict[str, Any]]) -> bool:
     """
     Determine if the conversation history contains a tool call that would
-    substantiate the given claim.
+    substantiate a claim of the given category.
 
-    Simple heuristics:
-    - Visual claims → require a vision-related tool call: analyze_screenshot, browse_page (with screenshot), or any tool that returned image data.
-    - Data claims → require a data extraction tool: xlsx_read, pdf_read, drive_read, repo_read, codebase_digest, run_shell, etc.
+    Visual claim → vision tools: analyze_screenshot, browse_page, browser_action
+    Data claim → data tools: xlsx_read, pdf_read, drive_read, repo_read, codebase_digest, run_shell, chat_history, get_task_result, etc.
     """
-    # Check recent tool calls (last 20 messages)
-    recent_messages = messages[-20:] if len(messages) > 20 else messages
+    # Check recent messages (last 30)
+    recent_messages = messages[-30:] if len(messages) > 30 else messages
 
-    # Detect if any vision/data tool was called with a non-error result
     for msg in reversed(recent_messages):
         if msg.get("role") != "assistant":
             continue
         tool_calls = msg.get("tool_calls", [])
+        if not tool_calls:
+            continue
         for tc in tool_calls:
             fn_name = tc.get("function", {}).get("name", "")
-            # Vision tools
-            if fn_name in ("analyze_screenshot", "browse_page", "browser_action"):
-                return True
-            # Data extraction / system inspection tools
-            if fn_name in ("xlsx_read", "pdf_read", "drive_read", "repo_read", "codebase_digest", "run_shell", "chat_history"):
-                # For numeric/data claims, we consider these tools as justification
-                # even without parsing the exact result, as long as the call succeeded
-                return True
-
+            if claim_category == "visual":
+                if fn_name in ("analyze_screenshot", "browse_page", "browser_action"):
+                    return True
+            elif claim_category == "data":
+                if fn_name in ("xlsx_read", "pdf_read", "drive_read", "repo_read", "codebase_digest", "run_shell", "chat_history", "get_task_result", "wait_for_task", "list_available_tools"):
+                    return True
+            # Other categories not yet defined
     return False
 
 
 def _is_simple_greeting(text: str) -> bool:
-    """Detect if text is just a greeting or trivial statement without substantive claim."""
-    greetings = {"hello", "hi", "hey", "greetings", "good morning", "good evening", "thanks", "thank you"}
+    """Detect if text is just a greeting or trivial statement without substantive claims."""
+    greetings = {"hello", "hi", "hey", "greetings", "good morning", "good evening", "good afternoon", "thanks", "thank you", "ok", "okay", "understood", "noted"}
     lowered = text.strip().lower()
-    # If the entire message is just a greeting or very short (< 10 words) and no claim phrases
-    if lowered in greetings or len(text.split()) < 5:
+    if lowered in greetings:
+        return True
+    # Very short (<6 words) and no claim phrases (quick check)
+    if len(text.split()) < 6:
+        # If it contains claim patterns, it's not just a greeting
+        for pattern, _ in COMPILED_PATTERNS:
+            if pattern.search(text):
+                return False
         return True
     return False
 
@@ -112,18 +119,23 @@ def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -
     if not final_text or not final_text.strip():
         return True, []
 
-    # Ignore trivial/greeting responses
+    # Ignore trivial greetings only if there are no claim phrases at all
     if _is_simple_greeting(final_text):
-        return True, []
+        # But still check if there are any claim patterns; if yes, not a simple greeting
+        for pattern, _ in COMPILED_PATTERNS:
+            if pattern.search(final_text):
+                break
+        else:
+            return True, []
 
     claims = _extract_claims(final_text)
     if not claims:
         return True, []
 
     violations = []
-    for match_start, phrase, snippet in claims:
-        if not _tool_justifies_claim(phrase, messages):
-            violations.append(f"Unsubstantiated claim: \"{phrase}\" (context: \"{snippet}\")")
+    for match_start, phrase, snippet, category in claims:
+        if not _tool_justifies_claim(category, messages):
+            violations.append(f"Unsubstantiated {category} claim: \"{phrase}\" (context: \"{snippet}\")")
 
     if violations:
         return False, violations
@@ -131,10 +143,7 @@ def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -
 
 
 def format_violations_as_message(violations: List[str]) -> str:
-    """
-    Create a system message instructing the LLM to correct its response.
-    This message can be injected into the conversation to trigger a revision.
-    """
+    """Create a system message instructing the LLM to correct its response."""
     lines = [
         "[FABRICATION GUARD] Your response contains the following unsubstantiated claims:",
     ]
