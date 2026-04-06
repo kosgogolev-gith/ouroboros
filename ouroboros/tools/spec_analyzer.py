@@ -94,6 +94,12 @@ def get_tools() -> List[ToolEntry]:
                             "Text extracted from the commercial offer/KP document."
                         ),
                     },
+                    "requirements_sheet": {
+                        "type": "string",
+                        "description": (
+                            "Name of the specific worksheet to extract requirements from."
+                        ),
+                    },
                 },
                 "required": ["requirements_text", "offer_text"],
             },
