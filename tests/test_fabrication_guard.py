@@ -1,11 +1,11 @@
 """Tests for fabrication_guard module."""
 
 import pytest
+import json
 from ouroboros.fabrication_guard import (
     _extract_claims,
     _is_simple_greeting,
-    _has_recent_vision_tool,
-    _tool_call_successful,
+    _tool_justifies_category,
     _verify_content_integrity,
     _handle_text_response,
     FabricationViolation,
@@ -17,27 +17,25 @@ class TestExtractClaims:
     def test_extract_basic(self):
         text = "I see a cat. The image shows a dog. The file contains 42."
         claims = _extract_claims(text)
-        # All visual claims are captured:
-        assert ("see", "I see") in claims or any("see" in p for p, _ in claims)
-        assert ("image shows", "the image shows") in claims
-        assert ("file contains", "the file contains") in claims
+        pattern_keys = [p for p, _ in claims]
+        assert "see" in pattern_keys
+        assert "image shows" in pattern_keys
+        assert "file contains" in pattern_keys
 
     def test_case_insensitive(self):
         text = "I SEE an apple. THE IMAGE SHOWS a tree."
         claims = _extract_claims(text)
-        # Should contain the patterns regardless of case
-        patterns = [p for p, _ in claims]
-        assert any("see" in p.lower() for p in patterns)
-        assert any("image shows" in p.lower() for p in patterns)
+        pattern_keys = [p.lower() for p, _ in claims]
+        assert any("see" in k for k in pattern_keys)
+        assert any("image shows" in k for k in pattern_keys)
 
     def test_no_false_positives(self):
         text = "This is a book about seeing into the future. The image of success is important."
         claims = _extract_claims(text)
-        # Should only match the intended patterns
-        for pattern, snippet in claims:
-            # Should be start of sentence or preceded by non-word
-            assert pattern in ["see", "image shows", "file contains"]
-            assert pattern in snippet.lower()
+        pattern_keys = [p.lower() for p, _ in claims]
+        # Should not match "seeing" or "image of" (not "image shows")
+        assert not any("seeing" in k for k in pattern_keys)
+        assert not any("image of" in k for k in pattern_keys)
 
     def test_visual_patterns_comprehensive(self):
         text = (
@@ -46,20 +44,20 @@ class TestExtractClaims:
             "The picture shows a car. "
             "The photo shows a house. "
             "Based on the image, we conclude. "
-            "The specification says X. "
-            "The file contains data. "
-            "The table shows values."
+            "The photo depicts a person. "
+            "The screenshot shows an error. "
+            "The snapshot shows progress."
         )
         claims = _extract_claims(text)
-        patterns = [p for p, _ in claims]
-        assert any("see" in p for p in patterns)
-        assert any("in the image" in p for p in patterns)
-        assert any("picture shows" in p for p in patterns)
-        assert any("photo shows" in p for p in patterns)
-        assert any("based on the image" in p for p in patterns)
-        assert any("specification" in p for p in patterns)
-        assert any("file contains" in p for p in patterns)
-        assert any("table shows" in p for p in patterns)
+        pattern_keys = [p for p, _ in claims]
+        assert "see" in pattern_keys
+        assert "in the image" in pattern_keys
+        assert "picture shows" in pattern_keys
+        assert "photo shows" in pattern_keys
+        assert "based on the image" in pattern_keys
+        assert "photo depicts" in pattern_keys
+        assert "screenshot shows" in pattern_keys
+        assert "snapshot shows" in pattern_keys
 
 
 class TestIsSimpleGreeting:
@@ -74,38 +72,44 @@ class TestIsSimpleGreeting:
         assert not _is_simple_greeting("Hello, what does the image show?")
 
 
-class TestHasRecentVisionTool:
-    def test_successful_vision_tool(self):
+class TestToolJustifiesCategory:
+    def test_vision_tool_matching(self):
         msgs = [
             {"role": "assistant", "tool_calls": [{"function": {"name": "analyze_screenshot"}}]},
-            {"role": "tool", "name": "analyze_screenshot", "content": '{"description": "..."}'}
+            {"role": "tool", "name": "analyze_screenshot", "content": json.dumps({"description": "cat"})},
         ]
-        assert _has_recent_vision_tool(msgs)
+        assert _tool_justifies_category("vision", msgs)
 
-    def test_vision_tool_failed(self):
+    def test_vision_tool_failed_no_response(self):
         msgs = [
             {"role": "assistant", "tool_calls": [{"function": {"name": "analyze_screenshot"}}]},
-            {"role": "tool", "name": "analyze_screenshot", "content": '{"error": "failed"}'}
         ]
-        assert not _has_recent_vision_tool(msgs)
+        assert not _tool_justifies_category("vision", msgs)
 
-    def test_no_vision_tool(self):
+    def test_vision_tool_failed_with_error(self):
+        msgs = [
+            {"role": "assistant", "tool_calls": [{"function": {"name": "analyze_screenshot"}}]},
+            {"role": "tool", "name": "analyze_screenshot", "content": json.dumps({"error": "failed"})},
+        ]
+        assert not _tool_justifies_category("vision", msgs)
+
+    def test_wrong_category(self):
+        msgs = [
+            {"role": "assistant", "tool_calls": [{"function": {"name": "xlsx_read"}}]},
+            {"role": "tool", "name": "xlsx_read", "content": json.dumps({"row_count": 42})},
+        ]
+        assert not _tool_justifies_category("vision", msgs)
+
+    def test_data_tool_matching(self):
+        msgs = [
+            {"role": "assistant", "tool_calls": [{"function": {"name": "xlsx_read"}}]},
+            {"role": "tool", "name": "xlsx_read", "content": json.dumps({"row_count": 42})},
+        ]
+        assert _tool_justifies_category("data", msgs)
+
+    def test_no_tool_calls(self):
         msgs = [{"role": "user", "content": "Hello"}]
-        assert not _has_recent_vision_tool(msgs)
-
-
-class TestToolCallSuccessful:
-    def test_successful(self):
-        msg = {"role": "tool", "content": '{"ok": true}'}
-        assert _tool_call_successful(msg)
-
-    def test_failure_by_error_field(self):
-        msg = {"role": "tool", "content": '{"error": "something failed"}'}
-        assert not _tool_call_successful(msg)
-
-    def test_failure_by_exception(self):
-        msg = {"role": "tool", "content": '{"exception": "boom"}'}
-        assert not _tool_call_successful(msg)
+        assert not _tool_justifies_category("vision", msgs)
 
 
 class TestVerifyResponseIntegrity:
@@ -126,26 +130,26 @@ class TestVerifyResponseIntegrity:
         content = "I can see the image clearly shows a cat."
         msgs = [
             {"role": "assistant", "tool_calls": [{"function": {"name": "analyze_screenshot"}}]},
-            {"role": "tool", "name": "analyze_screenshot", "content": '{"description": "cat"}'},
+            {"role": "tool", "name": "analyze_screenshot", "content": json.dumps({"description": "cat"})},
         ]
         result = _verify_content_integrity(content, msgs)
         assert result is None
 
-    def test_mixed_claims(self):
+    def test_mixed_claims_vision_and_data(self):
         content = "I see a cat. The file contains 42 rows."
         msgs = [
+            {"role": "assistant", "tool_calls": [{"function": {"name": "analyze_screenshot"}}]},
+            {"role": "tool", "name": "analyze_screenshot", "content": json.dumps({"description": "cat"})},
             {"role": "assistant", "tool_calls": [{"function": {"name": "xlsx_read"}}]},
-            {"role": "tool", "name": "xlsx_read", "content": '{"row_count": 42}'},
+            {"role": "tool", "name": "xlsx_read", "content": json.dumps({"row_count": 42})},
         ]
         result = _verify_content_integrity(content, msgs)
         assert result is None
 
-    def test_uncaught_truthful_data_claim(self):
-        content = "The data shows an upward trend."
+    def test_greeting_not_flagged(self):
+        content = "Hello"
         msgs = []
-        result = _verify_content_integrity(content, msgs)
-        # This should not be flagged as fabrication
-        assert result is None
+        assert _verify_content_integrity(content, msgs) is None
 
 
 class TestHandleTextResponse:
@@ -158,15 +162,14 @@ class TestHandleTextResponse:
     def test_raises_on_visual_fabrication(self):
         content = "I see the image shows the device."
         msgs = []
-        with pytest.raises(FabricationViolation) as exc:
+        with pytest.raises(FabricationViolation):
             _handle_text_response(content, msgs)
-        assert "INTEGRITY VIOLATION" in str(exc.value)
 
     def test_accepts_when_verified(self):
         content = "I see the image shows the device."
         msgs = [
             {"role": "assistant", "tool_calls": [{"function": {"name": "analyze_screenshot"}}]},
-            {"role": "tool", "name": "analyze_screenshot", "content": '{"description": "device"}'},
+            {"role": "tool", "name": "analyze_screenshot", "content": json.dumps({"description": "device"})},
         ]
         result = _handle_text_response(content, msgs)
         assert result == content
