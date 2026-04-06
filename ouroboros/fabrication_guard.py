@@ -1,160 +1,201 @@
 """Fabrication Guard — Integrity verification for Ouroboros."""
 
 import re
-from typing import Any, Dict, List, Tuple
+from typing import List, Tuple, Optional, Set
+from dataclasses import dataclass
 
-# Phrases indicating visual content claims
-VISUAL_CLAIM_PATTERNS = [
-    r"\bI see\b",
-    r"\bin the image\b",
-    r"\bthe image shows\b",
-    r"\bthe picture shows\b",
-    r"\bthe photo shows\b",
-    r"\bthe screenshot shows\b",
-    r"\bthe video shows\b",
-    r"\bthe diagram shows\b",
-    r"\bon the screen\b",
-    r"\bappears to be\b",
-    r"\bappears\b(?!\s+to\s+have\s+been\s+verified)",  # caution: match "appears" when it indicates visual impression
-    r"\bvisible\b",
-    r"\blooking at\b",
-    r"\bview shows\b",
+# ============================================================================
+# Public exception class
+# ============================================================================
+
+class FabricationViolation(Exception):
+    """Raised when response content integrity check fails."""
+    def __init__(self, message: str, claims: List[Tuple[str, str]]):
+        super().__init__(message)
+        self.claims = claims
+
+
+# ============================================================================
+# Claim patterns
+# ============================================================================
+
+VISUAL_PATTERNS = [
+    # Exact phrase patterns
+    (r'\bI\s+see\b', 'see'),
+    (r'\bthe\s+image\s+shows\b', 'image shows'),
+    (r'\bthe\s+picture\s+shows\b', 'picture shows'),
+    (r'\bthe\s+photo\s+shows\b', 'photo shows'),
+    (r'\bbased\s+on\s+the\s+image\b', 'based on the image'),
+    (r'\bin\s+the\s+image\b', 'in the image'),
+    (r'\bthe\s+photo\s+depicts\b', 'photo depicts'),
+    (r'\bthe\s+screenshot\s+shows\b', 'screenshot shows'),
+    (r'\bthe\s+snapshot\s+shows\b', 'snapshot shows'),
+    # Documented specs (stated facts)
+    (r'\bthe\s+specification\s+(says|states|requires)\b', 'specification'),
+    (r'\bthe\s+requirements\s+(say|state)\b', 'requirements'),
+    # Data extraction claims
+    (r'\bthe\s+file\s+contains\b', 'file contains'),
+    (r'\bthe\s+data\s+shows\b', 'data shows'),
+    (r'\bthe\s+table\s+shows\b', 'table shows'),
+    (r'\bthe\s+spreadsheet\s+contains\b', 'spreadsheet contains'),
+    (r'\brows?\s+number\b', 'rows number'),
+    (r'\bcount\s+of\b', 'count of'),
 ]
 
-# Phrases indicating numeric/data claims — more specific to file/sheet analysis
-DATA_CLAIM_PATTERNS = [
-    r"\bthe (excel|spreadsheet|xlsx) (file )?contains\s+\d+\s+",
-    r"\bthe document contains\s+\d+\s+(rows|items|records)",
-    r"\bfile contains\s+\d+\b",
-    r"\bhas\s+\d+\s+rows\b",
-    r"\brows?:\s*\d+\b",
-    r"\bvalue is\s+[\d.]+\s*[%$]?\b",
-    r"\brunning\s+\d+\s+processes\b",
-    r"\bprocesses?\s+are\s+running\b",
-    r"\bstatus\s+is\s+\w+\b",  # specific status strings
-    r"\boutput shows\b",
-    r"\boutput indicates\b",
-    r"\bfound\s+\d+\s+items?\b",
-    r"\b\d+\s+items?\s+found\b",
-]
+COMPILED_PATTERNS = [(re.compile(pat, re.I), key) for (pat, key) in VISUAL_PATTERNS]
 
-# Compile all patterns
-COMPILED_PATTERNS: List[Tuple[re.Pattern, str]] = []
-for pat in VISUAL_CLAIM_PATTERNS:
-    COMPILED_PATTERNS.append((re.compile(pat, re.IGNORECASE), "visual"))
-for pat in DATA_CLAIM_PATTERNS:
-    COMPILED_PATTERNS.append((re.compile(pat, re.IGNORECASE), "data"))
+# ============================================================================
+# Tool mapping by category
+# ============================================================================
 
+def _tool_category(tool_name: str) -> Optional[str]:
+    nm = tool_name.lower()
+    if nm in {"analyze_screenshot", "browse_page", "browser_action", "analyze_image"}:
+        return "vision"
+    if nm in {
+        "xlsx_read", "pdf_read", "drive_read", "repo_read",
+        "codebase_digest", "codebase_tree", "codebase_search",
+        "list_github_issues", "get_github_issue", "chat_history",
+        "knowledge_read"
+    }:
+        return "data"
+    return None
 
-def _extract_claims(text: str) -> List[Tuple[int, str, str, str]]:
-    """
-    Find all claim-like phrases in the text.
+# ============================================================================
+# Claim extraction
+# ============================================================================
 
-    Returns list of (match_start, matched_text, snippet, category).
-    Category: "visual", "data", or "other" (should not occur).
-    """
+def _extract_claims(text: str) -> List[Tuple[str, str]]:
+    """Return list of (pattern_key, snippet) for each claim in text."""
     claims = []
-    for pattern, category in COMPILED_PATTERNS:
-        for match in pattern.finditer(text):
-            start = max(0, match.start() - 50)
-            end = min(len(text), match.end() + 50)
+    for regex, key in COMPILED_PATTERNS:
+        for m in regex.finditer(text):
+            start = max(m.start() - 30, 0)
+            end = min(m.end() + 30, len(text))
             snippet = text[start:end].strip()
-            claims.append((match.start(), match.group(), snippet, category))
-    # Sort by position to preserve order
-    claims.sort(key=lambda x: x[0])
+            claims.append((key, snippet))
     return claims
 
-
-def _tool_justifies_category(category: str, messages: List[Dict[str, Any]]) -> bool:
-    """
-    Determine if the conversation history contains a tool call that would
-    substantiate a claim of the given category.
-    """
-    recent_messages = messages[-30:] if len(messages) > 30 else messages
-
-    for msg in reversed(recent_messages):
-        if msg.get("role") != "assistant":
-            continue
-        tool_calls = msg.get("tool_calls", [])
-        if not tool_calls:
-            continue
-        for tc in tool_calls:
-            fn_name = tc.get("function", {}).get("name", "")
-            if category == "visual":
-                if fn_name in ("analyze_screenshot", "browse_page", "browser_action"):
-                    return True
-            elif category == "data":
-                if fn_name in ("xlsx_read", "pdf_read", "drive_read", "repo_read", "codebase_digest", "run_shell", "chat_history", "get_task_result", "wait_for_task", "list_available_tools", "knowledge_read", "knowledge_write"):
-                    return True
-            # Other categories not yet defined; do not block
-    return False
-
-
-def _tool_justifies_claim(category: str, messages: List[Dict[str, Any]]) -> bool:
-    """Compatibility wrapper for tests (bridges test name to internal impl)."""
-    return _tool_justifies_category(category, messages)
-
+# ============================================================================
+# Greeting detection
+# ============================================================================
 
 def _is_simple_greeting(text: str) -> bool:
-    """Detect if text is just a greeting or trivial statement without substantive claims."""
-    greetings = {"hello", "hi", "hey", "greetings", "good morning", "good evening", "good afternoon", "thanks", "thank you", "ok", "okay", "understood", "noted"}
-    lowered = text.strip().lower()
-    # Remove punctuation for matching
-    lowered_clean = re.sub(r"[^\w\s]", "", lowered)
-    if lowered_clean in greetings:
-        return True
-    # Very short (<6 words) and no claim phrases — treat as trivial
-    if len(text.split()) < 6:
-        for pattern, _ in COMPILED_PATTERNS:
-            if pattern.search(text):
-                return False
-        return True
+    """Heuristic to avoid fabricating in pure greetings."""
+    text_low = text.strip().lower()
+    if len(text_low.split()) <= 3:
+        greetings = {"hi", "hello", "hey", "greetings", "good morning", "good evening"}
+        if any(g in text_low for g in greetings):
+            return True
     return False
 
+# ============================================================================
+# Tool presence helpers
+# ============================================================================
 
-def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -> Tuple[bool, List[str]]:
-    """
-    Verify that the final response does not contain unsubstantiated claims.
-    Returns (is_clean, list_of_violations).
-    """
-    if not final_text or not final_text.strip():
-        return True, []
+def _has_recent_vision_tool(messages: List[dict]) -> bool:
+    """Check if the last tool call (if any) was a vision tool and succeeded."""
+    # Find last assistant message with tool_calls
+    last_tool_call = None
+    for m in reversed(messages):
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            last_tool_call = m["tool_calls"][0]["function"]["name"]
+            break
+        if m.get("role") == "tool":
+            # We reached a tool response; the preceding assistant was already matched
+            break
+    if not last_tool_call:
+        return False
+    return _tool_category(last_tool_call) == "vision"
 
-    # Ignore trivial greetings if they contain no claim patterns
-    if _is_simple_greeting(final_text):
-        for pattern, _ in COMPILED_PATTERNS:
-            if pattern.search(final_text):
+def _tool_call_successful(tool_msg: dict) -> bool:
+    """Check if a tool message indicates success (no 'error' or 'exception' field with truthy value)."""
+    content = tool_msg.get("content", "")
+    # JSON string -> dict for simplicity
+    try:
+        import json
+        data = json.loads(content)
+        if data.get("error") or data.get("exception"):
+            return False
+        return True
+    except Exception:
+        return True  # if not JSON, assume successful
+
+def _tool_justifies_category(category: str, messages: List[dict]) -> bool:
+    """Return True if a recent tool call of the given category succeeded."""
+    # Find last assistant tool call of this category
+    last_tool_name = None
+    for m in reversed(messages):
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            last_tool_name = m["tool_calls"][0]["function"]["name"]
+            if _tool_category(last_tool_name) == category:
                 break
-        else:
-            return True, []
+        if m.get("role") == "tool":
+            # We passed the tool call and found its response
+            break
+    if not last_tool_name:
+        return False
+    # Find corresponding tool response message
+    for m in reversed(messages):
+        if m.get("role") == "tool" and m.get("name") == last_tool_name:
+            return _tool_call_successful(m)
+    return False
 
-    claims = _extract_claims(final_text)
+# ============================================================================
+# Core verification
+# ============================================================================
+
+def _verify_content_integrity(content: str, messages: List[dict]) -> Optional[str]:
+    """
+    Verify that any claim about visual or document content in `content` is
+    substantiated by a recent successful tool call of the appropriate category.
+    Returns violation message string if check fails, None if all clear.
+    """
+    if _is_simple_greeting(content):
+        return None
+
+    claims = _extract_claims(content)
     if not claims:
-        return True, []
+        return None
 
-    violations = []
-    for match_start, phrase, snippet, category in claims:
-        if not _tool_justifies_claim(category, messages):
-            violations.append(f"Unsubstantiated {category} claim: \"{phrase}\" (context: \"{snippet}\")")
+    violating_claims = []
+    for pattern_key, snippet in claims:
+        category = "vision" if pattern_key in {
+            "see", "image shows", "picture shows", "photo shows",
+            "based on the image", "in the image", "photo depicts",
+            "screenshot shows", "snapshot shows"
+        } else "data"
+        if not _tool_justifies_category(category, messages):
+            violating_claims.append(f"- Unsubstantiated: '{snippet}' (pattern: {pattern_key})")
 
-    if violations:
-        return False, violations
-    return True, []
+    if violating_claims:
+        return ("INTEGRITY VIOLATION: The following claims are not backed by tool data:\n" +
+                "\n".join(violating_claims) +
+                "\nPlease revise to remove or substantiate them. Do not claim to see or analyze what you haven't actually processed.")
+    return None
 
 
-def format_violations_as_message(violations: List[str]) -> str:
-    """Create a system message instructing the LLM to correct its response."""
-    lines = [
-        "[FABRICATION GUARD] Your response contains the following unsubstantiated claims:",
-    ]
-    for v in violations:
-        lines.append(f"  • {v}")
-    lines.extend([
-        "",
-        "Please revise your answer to only include information you have actually obtained through tool calls.",
-        "If you need to verify something, call the appropriate tool first.",
-        "Do not describe what you think you see without using a vision tool.",
-        "Do not state numeric facts without referencing extracted data.",
-        "Provide your corrected response now, without further tool calls if possible."
-    ])
-    return "\n".join(lines)
+# ============================================================================
+# Wrappers used by core loop
+# ============================================================================
+
+def _handle_text_response(content: str, messages: List[dict]) -> str:
+    """
+    Wrap response content with integrity verification. If violations found,
+    raise FabricationViolation to force retry.
+    """
+    violation = _verify_content_integrity(content, messages)
+    if violation:
+        # Attach context for the LLM to understand what is expected
+        raise FabricationViolation(violation, [])
+    return content
+
+
+def _format_violation_as_message(violation: FabricationViolation) -> dict:
+    """
+    Create a system message that explains fabrication rules for debugging.
+    """
+    return {
+        "role": "system",
+        "content": str(violation)
+    }
