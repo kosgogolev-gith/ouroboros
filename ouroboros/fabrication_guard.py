@@ -22,21 +22,21 @@ VISUAL_CLAIM_PATTERNS = [
     r"\bview shows\b",
 ]
 
-# Phrases indicating numeric/data claims
+# Phrases indicating numeric/data claims — more specific to file/sheet analysis
 DATA_CLAIM_PATTERNS = [
-    r"\bthe document contains\b",
-    r"\bthe file contains\b",
-    r"\bcontains\s+\d+\s+items\b",
+    r"\bthe (excel|spreadsheet|xlsx) (file )?contains\s+\d+\s+",
+    r"\bthe document contains\s+\d+\s+(rows|items|records)",
+    r"\bfile contains\s+\d+\b",
     r"\bhas\s+\d+\s+rows\b",
-    r"\bvalue is\b",
-    r"\bis\s+[\d.]+\s*[%$]?\b",
+    r"\brows?:\s*\d+\b",
+    r"\bvalue is\s+[\d.]+\s*[%$]?\b",
     r"\brunning\s+\d+\s+processes\b",
     r"\bprocesses?\s+are\s+running\b",
-    r"\bstatus\s+is\b",
-    r"\bthe output shows\b",
+    r"\bstatus\s+is\s+\w+\b",  # specific status strings
+    r"\boutput shows\b",
     r"\boutput indicates\b",
+    r"\bfound\s+\d+\s+items?\b",
     r"\b\d+\s+items?\s+found\b",
-    r"\bfound\s+\d+\b",
 ]
 
 # Compile all patterns and keep mapping to category
@@ -107,11 +107,12 @@ def _is_simple_greeting(text: str) -> bool:
     """Detect if text is just a greeting or trivial statement without substantive claims."""
     greetings = {"hello", "hi", "hey", "greetings", "good morning", "good evening", "good afternoon", "thanks", "thank you", "ok", "okay", "understood", "noted"}
     lowered = text.strip().lower()
-    if lowered in greetings:
+    # Remove punctuation for matching
+    lowered_clean = re.sub(r"[^\w\s]", "", lowered)
+    if lowered_clean in greetings:
         return True
-    # Very short (<6 words) and no claim phrases (quick check)
+    # Very short (<6 words) and no claim phrases — treat as trivial
     if len(text.split()) < 6:
-        # If it contains claim patterns, it's not just a greeting
         for pattern, _ in COMPILED_PATTERNS:
             if pattern.search(text):
                 return False
@@ -127,9 +128,8 @@ def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -
     if not final_text or not final_text.strip():
         return True, []
 
-    # Ignore trivial greetings only if there are no claim phrases at all
+    # Ignore trivial greetings if they contain no claim patterns
     if _is_simple_greeting(final_text):
-        # But still check if there are any claim patterns; if yes, not a simple greeting
         for pattern, _ in COMPILED_PATTERNS:
             if pattern.search(final_text):
                 break
