@@ -90,6 +90,11 @@ def _tool_justifies_category(category: str, messages: List[Dict[str, Any]]) -> b
     return False
 
 
+def _tool_justifies_claim(category: str, messages: List[Dict[str, Any]]) -> bool:
+    """Compatibility wrapper for tests (bridges test name to internal impl)."""
+    return _tool_justifies_category(category, messages)
+
+
 def _is_simple_greeting(text: str) -> bool:
     """Detect if text is just a greeting or trivial statement without substantive claims."""
     greetings = {"hello", "hi", "hey", "greetings", "good morning", "good evening", "good afternoon", "thanks", "thank you", "ok", "okay", "understood", "noted"}
@@ -129,7 +134,7 @@ def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -
 
     violations = []
     for match_start, phrase, snippet, category in claims:
-        if not _tool_justifies_category(category, messages):
+        if not _tool_justifies_claim(category, messages):
             violations.append(f"Unsubstantiated {category} claim: \"{phrase}\" (context: \"{snippet}\")")
 
     if violations:
