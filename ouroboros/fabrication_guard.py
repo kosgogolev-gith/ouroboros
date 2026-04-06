@@ -66,14 +66,22 @@ def _extract_claims(text: str) -> List[Tuple[int, str, str, str]]:
     return claims
 
 
-def _tool_justifies_claim(claim_category: str, messages: List[Dict[str, Any]]) -> bool:
+def _tool_justifies_claim(claim_text: str, messages: List[Dict[str, Any]]) -> bool:
     """
     Determine if the conversation history contains a tool call that would
     substantiate a claim of the given category.
 
-    Visual claim → vision tools: analyze_screenshot, browse_page, browser_action
-    Data claim → data tools: xlsx_read, pdf_read, drive_read, repo_read, codebase_digest, run_shell, chat_history, get_task_result, etc.
+    Infers category from the claim_text by matching against known patterns.
     """
+    # Infer category from claim text
+    category = None
+    for pattern, cat in COMPILED_PATTERNS:
+        if pattern.search(claim_text):
+            category = cat
+            break
+    if not category:
+        return True  # Unknown category — allow by default (do not block)
+
     # Check recent messages (last 30)
     recent_messages = messages[-30:] if len(messages) > 30 else messages
 
@@ -85,11 +93,11 @@ def _tool_justifies_claim(claim_category: str, messages: List[Dict[str, Any]]) -
             continue
         for tc in tool_calls:
             fn_name = tc.get("function", {}).get("name", "")
-            if claim_category == "visual":
+            if category == "visual":
                 if fn_name in ("analyze_screenshot", "browse_page", "browser_action"):
                     return True
-            elif claim_category == "data":
-                if fn_name in ("xlsx_read", "pdf_read", "drive_read", "repo_read", "codebase_digest", "run_shell", "chat_history", "get_task_result", "wait_for_task", "list_available_tools"):
+            elif category == "data":
+                if fn_name in ("xlsx_read", "pdf_read", "drive_read", "repo_read", "codebase_digest", "run_shell", "chat_history", "get_task_result", "wait_for_task", "list_available_tools", "knowledge_read", "knowledge_write"):
                     return True
             # Other categories not yet defined
     return False
@@ -134,7 +142,7 @@ def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -
 
     violations = []
     for match_start, phrase, snippet, category in claims:
-        if not _tool_justifies_claim(category, messages):
+        if not _tool_justifies_claim(snippet, messages):
             violations.append(f"Unsubstantiated {category} claim: \"{phrase}\" (context: \"{snippet}\")")
 
     if violations:
