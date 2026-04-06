@@ -3,7 +3,6 @@
 import re
 import json
 from typing import List, Tuple, Optional
-from dataclasses import dataclass
 
 # ============================================================================
 # Public exception class
@@ -22,7 +21,7 @@ class FabricationViolation(Exception):
 
 VISUAL_PATTERNS = [
     # Exact phrase patterns requiring vision backing
-    (r'\bI\s+see\b', 'see'),
+    (r'\b(I\s+can\s+)?see\b', 'see'),
     (r'\bthe\s+image\s+shows?\b', 'image shows'),
     (r'\bthe\s+picture\s+shows?\b', 'picture shows'),
     (r'\bthe\s+photo\s+shows?\b', 'photo shows'),
@@ -31,13 +30,19 @@ VISUAL_PATTERNS = [
     (r'\bin\s+the\s+image\b', 'in the image'),
     (r'\bthe\s+screenshot\s+shows?\b', 'screenshot shows'),
     (r'\bthe\s+snapshot\s+shows?\b', 'snapshot shows'),
-    # Spec/requirements are considered non-fabrication if they come from knowledge base? We'll ignore for now.
-    # Documented specs (stated facts) — these may be from knowledge, not vision; treat as NOT requiring verification now.
-    # (r'\bthe\s+specification\s+(says|states|requires)\b', 'specification'),
-    # (r'\bthe\s+requirements\s+(say|state)\b', 'requirements'),
 ]
 
-COMPILED_PATTERNS = [(re.compile(pat, re.I), key) for (pat, key) in VISUAL_PATTERNS]
+DATA_PATTERNS = [
+    (r'\bthe\s+file\s+contains\b', 'file contains'),
+    (r'\bthe\s+data\s+shows\b', 'data shows'),
+    (r'\bthe\s+table\s+shows\b', 'table shows'),
+    (r'\bthe\s+spreadsheet\s+contains\b', 'spreadsheet contains'),
+    (r'\brows?\s+number\b', 'rows number'),
+    (r'\bcount\s+of\b', 'count of'),
+]
+
+ALL_PATTERNS = VISUAL_PATTERNS + DATA_PATTERNS
+COMPILED_PATTERNS = [(re.compile(pat, re.I), key) for (pat, key) in ALL_PATTERNS]
 
 # ============================================================================
 # Tool mapping by category
@@ -51,13 +56,11 @@ def _tool_category(tool_name: str) -> Optional[str]:
         "xlsx_read", "pdf_read", "drive_read", "repo_read",
         "codebase_digest", "codebase_tree", "codebase_search",
         "list_github_issues", "get_github_issue", "chat_history",
-        "knowledge_read", "spec_compare", "xlsx_reader", "tool_discovery"
+        "knowledge_read", "spec_compare", "xlsx_reader", "tool_discovery", "web_search"
     }:
         return "data"
-    # web_search returns search results but not raw images directly; treat as data
-    if nm == "web_search":
-        return "data"
     return None
+
 
 # ============================================================================
 # Claim extraction
@@ -80,7 +83,6 @@ def _extract_claims(text: str) -> List[Tuple[str, str]]:
 # ============================================================================
 
 def _is_simple_greeting(text: str) -> bool:
-    """Heuristic to avoid fabricating in pure greetings."""
     text_low = text.strip().lower()
     if len(text_low.split()) <= 3:
         greetings = {"hi", "hello", "hey", "greetings", "good morning", "good evening"}
@@ -93,45 +95,47 @@ def _is_simple_greeting(text: str) -> bool:
 # Tool presence helpers
 # ============================================================================
 
-def _find_last_assistant_tool_call(messages: List[dict]) -> Optional[dict]:
+def _find_last_tool_call_of_category(messages: List[dict], category: str) -> Optional[dict]:
     """
-    Return the last assistant message that has tool_calls, or None.
-    Also note if that tool_call has a corresponding tool response after it.
+    Scan messages backwards to find the last assistant tool call whose name maps to the given category.
+    Return the assistant message dict containing tool_calls, or None.
     """
-    for i in range(len(messages)-1, -1, -1):
-        m = messages[i]
+    for m in reversed(messages):
         if m.get("role") == "assistant" and m.get("tool_calls"):
-            return {"assistant_idx": i, "tool_call": m["tool_calls"][0]["function"]}
+            tool_name = m["tool_calls"][0]["function"]["name"]
+            if _tool_category(tool_name) == category:
+                return m
     return None
 
 
 def _tool_call_successful(tool_msg: dict) -> bool:
-    """Check if a tool message indicates success (no 'error' or 'exception' field with truthy value)."""
     try:
         data = json.loads(tool_msg.get("content", ""))
         if data.get("error") or data.get("exception"):
             return False
         return True
     except Exception:
-        return True  # if not JSON, assume successful
+        return True
 
 
 def _tool_justifies_category(category: str, messages: List[dict]) -> bool:
     """
     Return True if there exists a successful tool call of the given category
-    that appears before the current user/assistant turn (i.e., in the recent past).
+    that appears before the current turn (i.e., in the recent past).
     """
-    # Find the last assistant tool call of the desired category
-    pair = _find_last_assistant_tool_call(messages)
-    if not pair:
+    # Find the most recent assistant message with a tool call of this category
+    assistant_msg = _find_last_tool_call_of_category(messages, category)
+    if not assistant_msg:
         return False
-    tool_name = pair["tool_call"]["name"]
-    if _tool_category(tool_name) != category:
-        return False
+    tool_name = assistant_msg["tool_calls"][0]["function"]["name"]
 
-    # Look for a tool response immediately following that assistant message
-    assistant_idx = pair["assistant_idx"]
-    next_idx = assistant_idx + 1
+    # Find the corresponding tool response that should appear immediately after
+    # messages list is ordered from oldest to newest; find index of assistant_msg
+    try:
+        idx = messages.index(assistant_msg)
+    except ValueError:
+        return False
+    next_idx = idx + 1
     if next_idx < len(messages):
         next_msg = messages[next_idx]
         if next_msg.get("role") == "tool" and next_msg.get("name") == tool_name:
@@ -144,11 +148,6 @@ def _tool_justifies_category(category: str, messages: List[dict]) -> bool:
 # ============================================================================
 
 def _verify_content_integrity(content: str, messages: List[dict]) -> Optional[str]:
-    """
-    Verify that any claim about visual or document content in `content` is
-    substantiated by a recent successful tool call of the appropriate category.
-    Returns violation message string if check fails, None if all clear.
-    """
     if _is_simple_greeting(content):
         return None
 
@@ -158,8 +157,13 @@ def _verify_content_integrity(content: str, messages: List[dict]) -> Optional[st
 
     violating_claims = []
     for pattern_key, snippet in claims:
-        category = "vision"
-        if category == "vision" and not _tool_justifies_category("vision", messages):
+        # Determine category from pattern key: if key in vision patterns list
+        if any(key == pattern_key for _, key in VISUAL_PATTERNS):
+            category = "vision"
+        else:
+            category = "data"
+
+        if not _tool_justifies_category(category, messages):
             violating_claims.append(f"- Unsubstantiated: '{snippet}' (pattern: {pattern_key})")
 
     if violating_claims:
@@ -169,15 +173,7 @@ def _verify_content_integrity(content: str, messages: List[dict]) -> Optional[st
     return None
 
 
-# ============================================================================
-# Wrappers used by core loop
-# ============================================================================
-
 def _handle_text_response(content: str, messages: List[dict]) -> str:
-    """
-    Wrap response content with integrity verification. If violations found,
-    raise FabricationViolation to force retry.
-    """
     violation = _verify_content_integrity(content, messages)
     if violation:
         raise FabricationViolation(violation, [])
@@ -185,9 +181,6 @@ def _handle_text_response(content: str, messages: List[dict]) -> str:
 
 
 def _format_violation_as_message(violation: FabricationViolation) -> dict:
-    """
-    Create a system message that explains fabrication rules for debugging.
-    """
     return {
         "role": "system",
         "content": str(violation)
