@@ -10,7 +10,7 @@ def _handle_text_response(
     content: Optional[str],
     llm_trace: Dict[str, Any],
     accumulated_usage: Dict[str, Any],
-    messages: List[Dict[str, Any]],  # Add the messages argument
+    messages: List[Dict[str, Any]],  # Add the messages argument, used in validation
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
     """
     Handle LLM response without tool calls (final response).
