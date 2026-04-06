@@ -108,12 +108,21 @@ def _handle_text_response(
     content: Optional[str],
     llm_trace: Dict[str, Any],
     accumulated_usage: Dict[str, Any],
+    messages: List[Dict[str, Any]],
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
     """
     Handle LLM response without tool calls (final response).
 
     Returns: (final_text, accumulated_usage, llm_trace)
     """
+    # Fabrication guard: check content integrity before allowing response
+    if content:
+        integrity_error = _verify_content_integrity(content, messages)
+        if integrity_error:
+            # Block the response and return an error message and request correction
+            # The supervisor will handle this as a task failure and re-prompt the agent
+            return integrity_error, accumulated_usage, llm_trace
+
     if content and content.strip():
         llm_trace["assistant_notes"].append(content.strip()[:320])
     return (content or ""), accumulated_usage, llm_trace
