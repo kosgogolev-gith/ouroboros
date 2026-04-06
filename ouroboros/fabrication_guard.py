@@ -1,8 +1,7 @@
 """Fabrication Guard — Integrity verification for Ouroboros."""
 
 import re
-from typing import Any, Dict, List, Tuple, Set
-
+from typing import Any, Dict, List, Tuple
 
 # Phrases indicating visual content claims
 VISUAL_CLAIM_PATTERNS = [
@@ -22,24 +21,24 @@ VISUAL_CLAIM_PATTERNS = [
     r"\bview shows\b",
 ]
 
-# Phrases indicating numeric/data claims
+# Phrases indicating numeric/data claims — more specific to file/sheet analysis
 DATA_CLAIM_PATTERNS = [
-    r"\bthe document contains\b",
-    r"\bthe file contains\b",
-    r"\bcontains\s+\d+\s+items\b",
+    r"\bthe (excel|spreadsheet|xlsx) (file )?contains\s+\d+\s+",
+    r"\bthe document contains\s+\d+\s+(rows|items|records)",
+    r"\bfile contains\s+\d+\b",
     r"\bhas\s+\d+\s+rows\b",
-    r"\bvalue is\b",
-    r"\bis\s+[\d.]+\s*[%$]?\b",
+    r"\brows?:\s*\d+\b",
+    r"\bvalue is\s+[\d.]+\s*[%$]?\b",
     r"\brunning\s+\d+\s+processes\b",
     r"\bprocesses?\s+are\s+running\b",
-    r"\bstatus\s+is\b",
-    r"\bthe output shows\b",
+    r"\bstatus\s+is\s+\w+\b",  # specific status strings
+    r"\boutput shows\b",
     r"\boutput indicates\b",
+    r"\bfound\s+\d+\s+items?\b",
     r"\b\d+\s+items?\s+found\b",
-    r"\bfound\s+\d+\b",
 ]
 
-# Compile all patterns and keep mapping to category
+# Compile all patterns
 COMPILED_PATTERNS: List[Tuple[re.Pattern, str]] = []
 for pat in VISUAL_CLAIM_PATTERNS:
     COMPILED_PATTERNS.append((re.compile(pat, re.IGNORECASE), "visual"))
@@ -66,23 +65,11 @@ def _extract_claims(text: str) -> List[Tuple[int, str, str, str]]:
     return claims
 
 
-def _tool_justifies_claim(claim_text: str, messages: List[Dict[str, Any]]) -> bool:
+def _tool_justifies_category(category: str, messages: List[Dict[str, Any]]) -> bool:
     """
     Determine if the conversation history contains a tool call that would
     substantiate a claim of the given category.
-
-    Infers category from the claim_text by matching against known patterns.
     """
-    # Infer category from claim text
-    category = None
-    for pattern, cat in COMPILED_PATTERNS:
-        if pattern.search(claim_text):
-            category = cat
-            break
-    if not category:
-        return True  # Unknown category — allow by default (do not block)
-
-    # Check recent messages (last 30)
     recent_messages = messages[-30:] if len(messages) > 30 else messages
 
     for msg in reversed(recent_messages):
@@ -99,7 +86,7 @@ def _tool_justifies_claim(claim_text: str, messages: List[Dict[str, Any]]) -> bo
             elif category == "data":
                 if fn_name in ("xlsx_read", "pdf_read", "drive_read", "repo_read", "codebase_digest", "run_shell", "chat_history", "get_task_result", "wait_for_task", "list_available_tools", "knowledge_read", "knowledge_write"):
                     return True
-            # Other categories not yet defined
+            # Other categories not yet defined; do not block
     return False
 
 
@@ -107,11 +94,12 @@ def _is_simple_greeting(text: str) -> bool:
     """Detect if text is just a greeting or trivial statement without substantive claims."""
     greetings = {"hello", "hi", "hey", "greetings", "good morning", "good evening", "good afternoon", "thanks", "thank you", "ok", "okay", "understood", "noted"}
     lowered = text.strip().lower()
-    if lowered in greetings:
+    # Remove punctuation for matching
+    lowered_clean = re.sub(r"[^\w\s]", "", lowered)
+    if lowered_clean in greetings:
         return True
-    # Very short (<6 words) and no claim phrases (quick check)
+    # Very short (<6 words) and no claim phrases — treat as trivial
     if len(text.split()) < 6:
-        # If it contains claim patterns, it's not just a greeting
         for pattern, _ in COMPILED_PATTERNS:
             if pattern.search(text):
                 return False
@@ -127,9 +115,8 @@ def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -
     if not final_text or not final_text.strip():
         return True, []
 
-    # Ignore trivial greetings only if there are no claim phrases at all
+    # Ignore trivial greetings if they contain no claim patterns
     if _is_simple_greeting(final_text):
-        # But still check if there are any claim patterns; if yes, not a simple greeting
         for pattern, _ in COMPILED_PATTERNS:
             if pattern.search(final_text):
                 break
@@ -142,7 +129,7 @@ def verify_response_integrity(final_text: str, messages: List[Dict[str, Any]]) -
 
     violations = []
     for match_start, phrase, snippet, category in claims:
-        if not _tool_justifies_claim(snippet, messages):
+        if not _tool_justifies_category(category, messages):
             violations.append(f"Unsubstantiated {category} claim: \"{phrase}\" (context: \"{snippet}\")")
 
     if violations:
