@@ -539,6 +539,23 @@ while True:
                     b64, mime = TG.download_file_base64(file_id)
                     if b64:
                         image_data = (b64, mime, caption)
+            else:
+                # Non-image document: download and save to inbox
+                file_id = doc.get("file_id")
+                file_name = doc.get("file_name", f"document_{doc.get('file_id', 'unknown')}")
+                if file_id:
+                    import base64 as _b64mod
+                    b64_data, _ = TG.download_file_base64(file_id)
+                    if b64_data:
+                        inbox_dir = DRIVE_ROOT / "inbox"
+                        inbox_dir.mkdir(parents=True, exist_ok=True)
+                        ts_prefix = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_")
+                        safe_name = ts_prefix + file_name.replace("/", "_").replace("\\", "_")
+                        file_path = inbox_dir / safe_name
+                        file_path.write_bytes(_b64mod.b64decode(b64_data))
+                        file_info = f"\n[Attached document: {file_path}] (type: {mime_type}, name: {file_name})"
+                        text = (text or "") + file_info
+                        log.info("Document saved: %s (%s)", file_path, mime_type)
 
         st = load_state()
         if st.get("owner_id") is None:
@@ -649,11 +666,36 @@ while True:
                         if not _batched_image:
                             _doc2 = _msg2.get("document") or {}
                             _photo2 = (_msg2.get("photo") or [None])[-1] or {}
-                            _fid2 = _photo2.get("file_id") or _doc2.get("file_id")
-                            if _fid2:
+                            _doc2_mime = str(_doc2.get("mime_type") or "")
+                            if _photo2.get("file_id"):
+                                _fid2 = _photo2["file_id"]
                                 _b642, _mime2 = TG.download_file_base64(_fid2)
                                 if _b642:
                                     _batched_image = (_b642, _mime2, _txt2)
+                            elif _doc2.get("file_id") and _doc2_mime.startswith("image/"):
+                                _fid2 = _doc2["file_id"]
+                                _b642, _mime2 = TG.download_file_base64(_fid2)
+                                if _b642:
+                                    _batched_image = (_b642, _mime2, _txt2)
+                            elif _doc2.get("file_id") and not _doc2_mime.startswith("image/"):
+                                # Non-image document in batch window
+                                _fid2 = _doc2["file_id"]
+                                _fname2 = _doc2.get("file_name", f"document_{_fid2}")
+                                import base64 as _b64mod
+                                _b642, _ = TG.download_file_base64(_fid2)
+                                if _b642:
+                                    _inbox2 = DRIVE_ROOT / "inbox"
+                                    _inbox2.mkdir(parents=True, exist_ok=True)
+                                    _ts2 = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_")
+                                    _safe2 = _ts2 + _fname2.replace("/", "_").replace("\\", "_")
+                                    _fpath2 = _inbox2 / _safe2
+                                    _fpath2.write_bytes(_b64mod.b64decode(_b642))
+                                    _doc_info2 = f"\n[Attached document: {_fpath2}] (type: {_doc2_mime}, name: {_fname2})"
+                                    if _txt2:
+                                        _batched_texts[-1] = _batched_texts[-1] + _doc_info2
+                                    else:
+                                        _batched_texts.append(_doc_info2)
+                                    log.info("Document saved (batch): %s (%s)", _fpath2, _doc2_mime)
 
             # Save state once if mutated during batch window
             if _batch_state_dirty:
