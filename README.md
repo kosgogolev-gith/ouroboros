@@ -1,6 +1,17 @@
 ## Changelog
 
-### 6.4.3 (2026-04-02)
+### 6.4.4 (2026-04-07)
+
+**Added:**
+- `spec_compare` tool — compliance matrix comparing vendor equipment offers against stored baseline requirements
+- Supports XLSX and PDF vendor documents
+- Parses requirements from knowledge base (`requirements-h200`, `requirements-b200x8`)
+- Generates ✅/⚠️/❌ status per parameter, flags critical deviations, and summarizes commercial terms
+
+**Removed:**
+- Duplicate `spec_analyzer.py` (consolidated into spec_compare)
+
+2026-04-02)
 
 **Added:**
 - GitHub REST API integration (`integrations/github.py`) — direct access to GitHub Issues without gh CLI dependency
