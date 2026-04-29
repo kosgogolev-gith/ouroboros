@@ -1,6 +1,6 @@
 ## Changelog
 
-### 6.4.2 (2026-04-02)
+### 6.4.5 (2026-04-02)
 
 **Added:**
 - GitHub REST API integration (`integrations/github.py`) — direct access to GitHub Issues without gh CLI dependency
