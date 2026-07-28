@@ -19,6 +19,11 @@ build/
 .pytest_cache/
 .mypy_cache/
 
+# Task manager local database (WAL mode)
+ouroboros/task_manager/tasks.db
+ouroboros/task_manager/tasks.db-wal
+ouroboros/task_manager/tasks.db-shm
+
 # OS
 .DS_Store
 Thumbs.db

@@ -43,6 +43,7 @@ TOOL_MODULES = [
     "ouroboros.tools.control",
     "ouroboros.tools.browser",
     "ouroboros.tools.review",
+    "ouroboros.tools.task_manager_tools",
 ]
 
 SUPERVISOR_MODULES = [
@@ -114,6 +115,10 @@ EXPECTED_TOOLS = [
     "compact_context",
     "list_available_tools",
     "enable_tools",
+    # Task manager
+    "task_add", "task_update", "task_list",
+    "task_approve", "task_reject",
+    "task_morning_review", "task_evening_review", "task_report",
 ]
 
 
