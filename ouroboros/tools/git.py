@@ -62,16 +62,36 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
         log.warning("_run_pre_push_tests called with ctx=None, skipping tests")
         return None
 
-    if os.environ.get("OUROBOROS_PRE_PUSH_TESTS", "1") != "1":
+    # Enable pre-push tests by default, allow OUROBOROS_PRE_PUSH_TESTS="0" to disable
+    if os.environ.get("OUROBOROS_PRE_PUSH_TESTS", "1") == "0":
         return None
 
     tests_dir = pathlib.Path(ctx.repo_dir) / "tests"
     if not tests_dir.exists():
         return None
 
+    # Search for pytest executable in common virtual environment paths
+    pytest_exec = None
+    for venv_path in [".venv/bin", "venv/bin"]:
+        candidate_path = pathlib.Path(ctx.repo_dir) / venv_path / "pytest"
+        if candidate_path.is_file() and os.access(candidate_path, os.X_OK):
+            pytest_exec = str(candidate_path)
+            break
+    
+    # Fallback to system pytest if not found in venvs
+    if pytest_exec is None:
+        pytest_exec = "pytest"
+
+    # Check if pytest is available
     try:
+        subprocess.run([pytest_exec, "--version"], capture_output=True, check=True, timeout=5)
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return f"⚠️ PRE_PUSH_TEST_ERROR: pytest command \'{pytest_exec}\' not found or not executable. Please ensure pytest is installed and accessible in your environment (e.g., pip install pytest or activate your venv)."
+
+    try:
+        # Run all tests in the tests/ directory
         result = subprocess.run(
-            ["pytest", "tests/", "-q", "--tb=line", "--no-header"],
+            [pytest_exec, "tests/", "-q", "--tb=line", "--no-header"],
             cwd=ctx.repo_dir,
             capture_output=True,
             text=True,
@@ -88,9 +108,6 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
 
     except subprocess.TimeoutExpired:
         return "⚠️ PRE_PUSH_TEST_ERROR: pytest timed out after 30 seconds"
-
-    except FileNotFoundError:
-        return "⚠️ PRE_PUSH_TEST_ERROR: pytest not installed or not found in PATH"
 
     except Exception as e:
         log.warning(f"Pre-push tests failed with exception: {e}", exc_info=True)
@@ -251,6 +268,5 @@ def get_tools() -> List[ToolEntry]:
             "description": "git diff (use staged=true to see staged changes after git add)",
             "parameters": {"type": "object", "properties": {
                 "staged": {"type": "boolean", "default": False, "description": "If true, show staged changes (--staged)"},
-            }, "required": []},
-        }, _git_diff, is_code_tool=True),
+            }, "required": []},''', _git_diff, is_code_tool=True),
     ]
