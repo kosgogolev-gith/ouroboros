@@ -3,6 +3,10 @@ import re
 import tempfile
 from pathlib import Path
 import ast
+import sys
+
+# Add the project root to sys.path for module discovery during tests
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ouroboros.llm import LLMClient
 from ouroboros.tools.memory import chat_history_tool, update_scratchpad_tool
@@ -60,7 +64,7 @@ def test_scratchpad_update():
         original_drive_root = os.environ.get("DRIVE_ROOT")
         os.environ["DRIVE_ROOT"] = tmpdir
         try:
-            Path(tmpdir).mkdir(parents=True, exist_ok=True)
+            Path(tmpdir).mkdir(parents=True, exc_ok=True)
             result = update_scratchpad_tool(content=test_content)
             assert isinstance(result, dict), "update_scratchpad should return a dictionary"
             assert "message" in result, "update_scratchpad result should contain 'message'"
@@ -84,7 +88,7 @@ def test_no_hardcoded_replies():
         assert False, f"prompts/SYSTEM.MD not found at {system_prompt_path.absolute()}"
 
     content = system_prompt_path.read_text()
-    assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \
+    assert not re.search(r"I am a (bot|service|assistant)\\.?", content, re.IGNORECASE), \
         "SYSTEM.MD should not contain hardcoded 'I am a bot/service/assistant' replies."
 
 def test_no_extremely_oversized_functions():
