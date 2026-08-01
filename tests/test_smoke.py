@@ -38,7 +38,8 @@ class MockDefaultAPI:
                 if original_drive_root:
                     os.environ["DRIVE_ROOT"] = original_drive_root
                 else:
-                    del os.environ["DRIVE_ROOT"]
+                    if "DRIVE_ROOT" in os.environ:
+                        del os.environ["DRIVE_ROOT"]
 
 default_api = MockDefaultAPI()
 
@@ -100,7 +101,7 @@ def test_no_hardcoded_replies():
         assert False, f"prompts/SYSTEM.MD not found at {system_prompt_path.absolute()}"
 
     content = system_prompt_path.read_text()
-    assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \\
+    assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \
         "SYSTEM.MD should not contain hardcoded 'I am a bot/service/assistant' replies."
 
 def test_no_extremely_oversized_functions():
@@ -138,8 +139,8 @@ def test_no_extremely_oversized_functions():
         except Exception as e:
             violations.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-    assert len(violations) == 0, \\
-        f"Codebase contains oversized functions or methods:\\n" + "\\n".join(violations)
+    assert len(violations) == 0, \
+        f"Codebase contains oversized functions or methods:\n" + "\n".join(violations)
 
 def test_function_count_reasonable():
     """
@@ -164,5 +165,5 @@ def test_function_count_reasonable():
         except Exception as e:
             parse_errors.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-    assert not parse_errors, f"Errors encountered during parsing:\\n" + "\\n".join(parse_errors)
+    assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
     assert function_count <= 400, f"Too many functions ({function_count}): consider refactoring or consolidating."
