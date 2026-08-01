@@ -268,5 +268,6 @@ def get_tools() -> List[ToolEntry]:
             "description": "git diff (use staged=true to see staged changes after git add)",
             "parameters": {"type": "object", "properties": {
                 "staged": {"type": "boolean", "default": False, "description": "If true, show staged changes (--staged)"},
-            }, "required": []}, _git_diff, is_code_tool=True),
+            }, "required": []}
+        }, _git_diff, is_code_tool=True),
     ]
