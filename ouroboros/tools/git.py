@@ -72,7 +72,7 @@ def _run_pre_push_tests(ctx: ToolContext) -> Optional[str]:
 
     # Search for pytest executable in common virtual environment paths
     pytest_exec = None
-    for venv_path in [".venv/bin", "venv/bin"]:
+    for venv_path in ["ouroboros_venv/bin", ".venv/bin", "venv/bin"]:
         candidate_path = pathlib.Path(ctx.repo_dir) / venv_path / "pytest"
         if candidate_path.is_file() and os.access(candidate_path, os.X_OK):
             pytest_exec = str(candidate_path)
@@ -215,7 +215,7 @@ def _repo_commit_push(ctx: ToolContext, commit_message: str, paths: Optional[Lis
             untracked = run_cmd(["git", "ls-files", "--others", "--exclude-standard"], cwd=ctx.repo_dir)
             if untracked.strip():
                 files = ", ".join(untracked.strip().split("\n"))
-                result += f"\n⚠️ WARNING: untracked files remain: {files} — they are NOT in git. Use repo_commit_push without paths to add everything."
+                result += f"\n⚠️ WARNING: untracked files remain: {files} — they are NOT in git. Use repo_commit_push without paths to add everything.\n"
         except Exception:
             log.debug("Failed to check for untracked files after repo_commit_push", exc_info=True)
             pass
