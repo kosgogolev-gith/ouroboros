@@ -5,7 +5,7 @@ from pathlib import Path
 import ast
 
 from ouroboros.llm import LLMClient
-from ouroboros.memory import chat_history_tool, update_scratchpad_tool
+from ouroboros.tools.control import chat_history_tool, update_scratchpad_tool 
 from ouroboros.tools.search import web_search_tool
 from ouroboros.tools.git import git_status_tool, git_diff_tool
 from ouroboros.tools.repo import repo_read_tool, repo_list_tool
