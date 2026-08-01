@@ -5,7 +5,7 @@ from pathlib import Path
 import ast
 
 from ouroboros.llm import LLMClient
-from ouroboros.memory import chat_history_tool, update_scratchpad_tool
+from ouroboros.tools.memory import chat_history_tool, update_scratchpad_tool
 from ouroboros.tools.search import web_search_tool
 from ouroboros.tools.git import git_status_tool, git_diff_tool
 from ouroboros.tools.repo import repo_read_tool, repo_list_tool
@@ -20,13 +20,13 @@ MAX_FUNCTION_LINES = 150
 MAX_FUNCTION_PARAMS = 8
 
 def test_imports():
-    \"\"\"Verify that essential modules can be imported without errors.\"\"\"
+    """Verify that essential modules can be imported without errors."""
     assert LLMClient is not None, "LLMClient should be importable"
     assert chat_history_tool is not None, "chat_history_tool should be importable"
     assert web_search_tool is not None, "web_search_tool should be importable"
 
 def test_ollama_client_init():
-    \"\"\"Ensure LLMClient can be initialized without crashing.\"\"\"
+    """Ensure LLMClient can be initialized without crashing."""
     try:
         client = LLMClient()
         assert client is not None, "LLMClient should be initialized"
@@ -34,7 +34,7 @@ def test_ollama_client_init():
         assert False, f"LLMClient initialization failed: {e}"
 
 def test_memory_chat_history_empty():
-    \"\"\"Verify chat history can be retrieved, even if empty.\"\"\"
+    """Verify chat history can be retrieved, even if empty."""
     # Use a temporary directory for memory files
     with tempfile.TemporaryDirectory() as tmpdir:
         original_drive_root = os.environ.get("DRIVE_ROOT")
@@ -53,7 +53,7 @@ def test_memory_chat_history_empty():
 
 
 def test_scratchpad_update():
-    \"\"\"Ensure scratchpad can be updated.\"\"\"
+    """Ensure scratchpad can be updated."""
     test_content = "This is a test scratchpad entry."
     # Use a temporary directory for memory files
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -78,20 +78,20 @@ def test_scratchpad_update():
 
 
 def test_no_hardcoded_replies():
-    \"\"\"Ensure no hardcoded 'I am a bot' or similar in prompts/SYSTEM.md.\"\"\"
+    """Ensure no hardcoded 'I am a bot' or similar in prompts/SYSTEM.md."""
     system_prompt_path = Path("prompts/SYSTEM.md")
     if not system_prompt_path.exists():
         assert False, f"prompts/SYSTEM.MD not found at {system_prompt_path.absolute()}"
 
     content = system_prompt_path.read_text()
-    assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \\
+    assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \
         "SYSTEM.MD should not contain hardcoded 'I am a bot/service/assistant' replies."
 
 def test_no_extremely_oversized_functions():
-    \"\"\"
+    """
     Checks for functions that exceed MAX_FUNCTION_LINES or MAX_FUNCTION_PARAMS in the codebase.
     This helps enforce Principle 5: Minimalism, by encouraging decomposition and readability.
-    \"\"\"
+    """
     repo_root = Path(__file__).parent.parent
     violations = []
 
@@ -122,14 +122,14 @@ def test_no_extremely_oversized_functions():
         except Exception as e:
             violations.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-    assert len(violations) == 0, \\
+    assert len(violations) == 0, \
         f"Codebase contains oversized functions or methods:\\n" + "\\n".join(violations)
 
 def test_function_count_reasonable():
-    \"\"\"
+    """
     Checks the total number of functions and methods in the codebase.
     This helps ensure overall codebase complexity remains manageable.
-    \"\"\"
+    """
     repo_root = Path(__file__).parent.parent
     function_count = 0
     parse_errors = []
