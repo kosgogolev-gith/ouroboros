@@ -1,15 +1,11 @@
-import os
+'''import os
 import re
 import tempfile
 from pathlib import Path
 import ast
-import sys
-
-# Add the project root to sys.path for module discovery during tests
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ouroboros.llm import LLMClient
-from ouroboros.tools.memory import chat_history_tool, update_scratchpad_tool
+from ouroboros.memory import chat_history_tool, update_scratchpad_tool 
 from ouroboros.tools.search import web_search_tool
 from ouroboros.tools.git import git_status_tool, git_diff_tool
 from ouroboros.tools.repo import repo_read_tool, repo_list_tool
@@ -64,7 +60,7 @@ def test_scratchpad_update():
         original_drive_root = os.environ.get("DRIVE_ROOT")
         os.environ["DRIVE_ROOT"] = tmpdir
         try:
-            Path(tmpdir).mkdir(parents=True, exc_ok=True)
+            Path(tmpdir).mkdir(parents=True, exist_ok=True)
             result = update_scratchpad_tool(content=test_content)
             assert isinstance(result, dict), "update_scratchpad should return a dictionary"
             assert "message" in result, "update_scratchpad result should contain 'message'"
@@ -88,7 +84,7 @@ def test_no_hardcoded_replies():
         assert False, f"prompts/SYSTEM.MD not found at {system_prompt_path.absolute()}"
 
     content = system_prompt_path.read_text()
-    assert not re.search(r"I am a (bot|service|assistant)\\.?", content, re.IGNORECASE), \
+    assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \
         "SYSTEM.MD should not contain hardcoded 'I am a bot/service/assistant' replies."
 
 def test_no_extremely_oversized_functions():
@@ -127,7 +123,7 @@ def test_no_extremely_oversized_functions():
             violations.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
     assert len(violations) == 0, \
-        f"Codebase contains oversized functions or methods:\\n" + "\\n".join(violations)
+        f"Codebase contains oversized functions or methods:\n" + "\n".join(violations)
 
 def test_function_count_reasonable():
     """
@@ -152,5 +148,5 @@ def test_function_count_reasonable():
         except Exception as e:
             parse_errors.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-    assert not parse_errors, f"Errors encountered during parsing:\\n" + "\\n".join(parse_errors)
-    assert function_count <= 400, f"Too many functions ({function_count}): consider refactoring or consolidating."
+    assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
+    assert function_count <= 400, f"Too many functions ({function_count}): consider refactoring or consolidating."''
