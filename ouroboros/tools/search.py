@@ -37,3 +37,6 @@ def get_tools() -> List[ToolEntry]:
             }, "required": ["query"]},
         }, _web_search_with_real_provider),
     ]
+
+# Alias for backward compatibility
+web_search_tool = _web_search_with_real_provider
