@@ -308,3 +308,7 @@ def get_tools() -> List[ToolEntry]:
             },
         }, _knowledge_list),
     ]
+
+# Aliases for test compatibility
+knowledge_read_tool = _knowledge_read
+knowledge_write_tool = _knowledge_write

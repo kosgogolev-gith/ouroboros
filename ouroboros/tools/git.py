@@ -272,3 +272,6 @@ def get_tools() -> List[ToolEntry]:
             }, "required": []}
         }, _git_diff, is_code_tool=True),
     ]
+# Aliases for test compatibility
+git_status_tool = _git_status
+git_diff_tool = _git_diff

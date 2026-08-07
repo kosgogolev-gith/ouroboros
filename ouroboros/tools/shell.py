@@ -258,3 +258,7 @@ def get_tools() -> List[ToolEntry]:
             }, "required": ["prompt"]},
         }, _claude_code_edit, is_code_tool=True, timeout_sec=300),
     ]
+
+# Aliases for test compatibility
+claude_code_edit_tool = _claude_code_edit
+run_shell_tool = _run_shell

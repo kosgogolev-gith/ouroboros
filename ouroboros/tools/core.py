@@ -399,3 +399,10 @@ def get_tools() -> List[ToolEntry]:
             }, "required": ["task_id", "message"]},
         }, _forward_to_worker),
     ]
+
+# Aliases for test compatibility
+repo_read_tool = _repo_read
+repo_list_tool = _repo_list
+drive_read_tool = _drive_read
+drive_list_tool = _drive_list
+drive_write_tool = _drive_write
