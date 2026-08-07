@@ -7,13 +7,13 @@ import os
 from typing import Any, Dict, List
 
 from ouroboros.tools.registry import ToolContext, ToolEntry
-from default_api import web_search as default_web_search
 
 
 def _web_search_with_real_provider(ctx: ToolContext, query: str) -> str:
     """Performs a web search using a real search provider, or provides a stub if unavailable."""
     try:
         # Attempt to call the actual web search tool provided by the environment
+        from default_api import web_search as default_web_search  # lazy import
         result = default_web_search(query=query)
         # The result from default_web_search is expected to be JSON-serializable
         return json.dumps(result, ensure_ascii=False, indent=2)
