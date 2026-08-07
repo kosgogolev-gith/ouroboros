@@ -110,8 +110,17 @@ class LLMClient:
         api_key: Optional[str] = None,
         base_url: str = "https://openrouter.ai/api/v1",
     ):
-        self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
-        self._base_url = base_url
+        # Cloud.ru backend support
+        cloudru_base = os.environ.get("CLOUDRU_BASE_URL", "")
+        cloudru_key = os.environ.get("CLOUDRU_API_KEY", "")
+        if cloudru_base and cloudru_key and not api_key:
+            self._api_key = cloudru_key
+            self._base_url = cloudru_base.rstrip("/")
+            self._is_cloudru = True
+        else:
+            self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+            self._base_url = base_url
+            self._is_cloudru = False
         self._client = None
 
     def _get_client(self):
@@ -120,7 +129,7 @@ class LLMClient:
             self._client = OpenAI(
                 base_url=self._base_url,
                 api_key=self._api_key,
-                default_headers={
+                default_headers={} if self._is_cloudru else {
                     "HTTP-Referer": "https://colab.research.google.com/",
                     "X-Title": "Ouroboros",
                 },
@@ -164,17 +173,16 @@ class LLMClient:
         client = self._get_client()
         effort = normalize_reasoning_effort(reasoning_effort)
 
-        extra_body: Dict[str, Any] = {
-            "reasoning": {"effort": effort, "exclude": True},
-        }
-
-        # Pin Anthropic models to Anthropic provider for prompt caching
-        if model.startswith("anthropic/"):
-            extra_body["provider"] = {
-                "order": ["Anthropic"],
-                "allow_fallbacks": False,
-                "require_parameters": True,
-            }
+        extra_body: Dict[str, Any] = {}
+        if not self._is_cloudru:
+            extra_body["reasoning"] = {"effort": effort, "exclude": True}
+            # Pin Anthropic models to Anthropic provider for prompt caching
+            if model.startswith("anthropic/"):
+                extra_body["provider"] = {
+                    "order": ["Anthropic"],
+                    "allow_fallbacks": False,
+                    "require_parameters": True,
+                }
 
         kwargs: Dict[str, Any] = {
             "model": model,
@@ -198,6 +206,10 @@ class LLMClient:
         usage = resp_dict.get("usage") or {}
         choices = resp_dict.get("choices") or [{}]
         msg = (choices[0] if choices else {}).get("message") or {}
+        # Cloud.ru thinking models may return content=None with text in reasoning_content
+        if self._is_cloudru and not msg.get("content") and msg.get("reasoning_content"):
+            msg = dict(msg)
+            msg["content"] = msg["reasoning_content"]
 
         # Extract cached_tokens from prompt_tokens_details if available
         if not usage.get("cached_tokens"):
