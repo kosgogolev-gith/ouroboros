@@ -5,9 +5,33 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch, PropertyMock
 import pathlib
+from typing import Optional # Import Optional
 
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+# Mock TelegramGateway before importing anything that depends on it
+class MockTelegramGateway:
+    def __init__(self, owner_id: int = 12345):
+        self.owner_id = owner_id
+
+    def send_document(self, file_path: str, caption: Optional[str] = None, chat_id: int = 12345):
+        print(f"MockTelegramGateway: Sending document {file_path} to {chat_id} with caption {caption}")
+        return True
+
+    def send_message(self, chat_id: int, text: str, reply_to_message_id: Optional[int] = None):
+        print(f"MockTelegramGateway: Sending message to {chat_id}: {text}")
+        return True
+
+    def download_file_base64(self, file_id: str) -> str:
+        print(f"MockTelegramGateway: Downloading file {file_id}")
+        return "mock_base64_content"
+
+# Use patch.dict to mock the module that ToolRegistry tries to import
+with patch.dict('sys.modules', {'ouroboros.supervisor.telegram_gateway': MagicMock(TelegramGateway=MockTelegramGateway)}):
+    from ouroboros.llm import LLMClient
+    from ouroboros.tools.registry import ToolContext, BrowserState, ToolRegistry
+    from ouroboros.tools.vision import _analyze_screenshot, _vlm_query
 
 
 class TestLLMVisionQuery(unittest.TestCase):
@@ -15,8 +39,6 @@ class TestLLMVisionQuery(unittest.TestCase):
 
     def test_vision_query_url_format(self):
         """vision_query builds correct message format for URL images."""
-        from ouroboros.llm import LLMClient
-
         client = LLMClient(api_key="test-key")
 
         captured_messages = []
@@ -46,8 +68,6 @@ class TestLLMVisionQuery(unittest.TestCase):
 
     def test_vision_query_base64_format(self):
         """vision_query builds correct data URI for base64 images."""
-        from ouroboros.llm import LLMClient
-
         client = LLMClient(api_key="test-key")
         captured_messages = []
 
@@ -71,8 +91,6 @@ class TestLLMVisionQuery(unittest.TestCase):
 
     def test_vision_query_multiple_images(self):
         """vision_query handles multiple images in one call."""
-        from ouroboros.llm import LLMClient
-
         client = LLMClient(api_key="test-key")
         captured_messages = []
 
@@ -95,8 +113,6 @@ class TestLLMVisionQuery(unittest.TestCase):
 
     def test_vision_query_empty_images(self):
         """vision_query works with no images (just text)."""
-        from ouroboros.llm import LLMClient
-
         client = LLMClient(api_key="test-key")
 
         def mock_chat(messages, model, tools=None, reasoning_effort="low", max_tokens=1024, tool_choice="auto"):
@@ -112,7 +128,6 @@ class TestAnalyzeScreenshotTool(unittest.TestCase):
     """Test the analyze_screenshot tool."""
 
     def _make_ctx(self, with_screenshot=True):
-        from ouroboros.tools.registry import ToolContext, BrowserState
         ctx = MagicMock(spec=ToolContext)
         ctx.browser_state = BrowserState()
         ctx.event_queue = None
@@ -126,17 +141,13 @@ class TestAnalyzeScreenshotTool(unittest.TestCase):
 
     def test_no_screenshot_returns_warning(self):
         """analyze_screenshot returns warning when no screenshot available."""
-        from ouroboros.tools.vision import _analyze_screenshot
-
         ctx = self._make_ctx(with_screenshot=False)
         result = _analyze_screenshot(ctx, prompt="What do you see?")
         self.assertIn("⚠️", result)
         self.assertIn("screenshot", result.lower())
 
     def test_analyze_screenshot_calls_vlm(self):
-        """analyze_screenshot calls VLM with the screenshot base64."""
-        from ouroboros.tools.vision import _analyze_screenshot
-
+        """analyze_screenshot calls VLM with the screenshot base64."""        
         ctx = self._make_ctx(with_screenshot=True)
 
         with patch("ouroboros.tools.vision._get_llm_client") as mock_get_client:
@@ -159,7 +170,6 @@ class TestVlmQueryTool(unittest.TestCase):
     """Test the vlm_query tool."""
 
     def _make_ctx(self):
-        from ouroboros.tools.registry import ToolContext, BrowserState
         ctx = MagicMock(spec=ToolContext)
         ctx.browser_state = BrowserState()
         ctx.event_queue = None
@@ -169,16 +179,12 @@ class TestVlmQueryTool(unittest.TestCase):
 
     def test_vlm_query_requires_image(self):
         """vlm_query returns error when no image provided."""
-        from ouroboros.tools.vision import _vlm_query
-
         ctx = self._make_ctx()
         result = _vlm_query(ctx, prompt="What is this?")
         self.assertIn("⚠️", result)
 
     def test_vlm_query_with_url(self):
         """vlm_query calls VLM with URL image."""
-        from ouroboros.tools.vision import _vlm_query
-
         ctx = self._make_ctx()
 
         with patch("ouroboros.tools.vision._get_llm_client") as mock_get_client:
@@ -195,12 +201,11 @@ class TestVlmQueryTool(unittest.TestCase):
 
     def test_vlm_query_tool_registered(self):
         """vlm_query and analyze_screenshot tools are properly registered."""
-        import pathlib
-        from ouroboros.tools.registry import ToolRegistry
-
+        mock_tg_instance = MockTelegramGateway()
         registry = ToolRegistry(
             repo_dir=pathlib.Path("/tmp"),
             drive_root=pathlib.Path("/tmp"),
+            tg=mock_tg_instance
         )
         tools = registry.available_tools()
         self.assertIn("analyze_screenshot", tools, "analyze_screenshot must be registered")
