@@ -107,7 +107,7 @@ class ToolRegistry:
             try:
                 mod = importlib.import_module(f"ouroboros.tools.{modname}")
                 if hasattr(mod, "get_tools"):
-                    for entry in mod.get_tools(self._ctx): # Pass self._ctx
+                    for entry in mod.get_tools():
                         self._entries[entry.name] = entry
             except Exception:
                 import logging
