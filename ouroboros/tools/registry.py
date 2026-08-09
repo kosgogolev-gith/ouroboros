@@ -1,10 +1,3 @@
-"""
-Ouroboros — Tool registry (SSOT).
-
-Plugin architecture: each module in tools/ exports get_tools().
-ToolRegistry collects all tools, provides schemas() and execute().
-"""
-
 from __future__ import annotations
 
 import json
@@ -13,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from ouroboros.utils import safe_relpath
+from ouroboros.supervisor.telegram_gateway import TelegramGateway # Added import
 
 
 @dataclass
@@ -37,6 +31,7 @@ class ToolContext:
     current_task_type: Optional[str] = None
     last_push_succeeded: bool = False
     emit_progress_fn: Callable[[str], None] = field(default=lambda _: None)
+    tg: TelegramGateway = field(default=None) # Added tg: TelegramGateway
 
     # LLM-driven model/effort switch (set by switch_model tool, read by loop.py)
     active_model_override: Optional[str] = None
@@ -98,9 +93,9 @@ class ToolRegistry:
     export get_tools() -> List[ToolEntry].
     """
 
-    def __init__(self, repo_dir: pathlib.Path, drive_root: pathlib.Path):
+    def __init__(self, repo_dir: pathlib.Path, drive_root: pathlib.Path, tg: TelegramGateway): # Added tg
         self._entries: Dict[str, ToolEntry] = {}
-        self._ctx = ToolContext(repo_dir=repo_dir, drive_root=drive_root)
+        self._ctx = ToolContext(repo_dir=repo_dir, drive_root=drive_root, tg=tg) # Pass tg
         self._load_modules()
 
     def _load_modules(self) -> None:
@@ -114,7 +109,7 @@ class ToolRegistry:
             try:
                 mod = importlib.import_module(f"ouroboros.tools.{modname}")
                 if hasattr(mod, "get_tools"):
-                    for entry in mod.get_tools():
+                    for entry in mod.get_tools(self._ctx): # Pass self._ctx
                         self._entries[entry.name] = entry
             except Exception:
                 import logging
