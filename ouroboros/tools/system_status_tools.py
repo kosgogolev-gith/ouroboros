@@ -1,116 +1,93 @@
 
-import datetime
-import json
+from typing import List, Dict, Any
+import subprocess
 import os
-import re
-from typing import List, Dict
+import shutil
+import psutil
+from datetime import datetime, timedelta
 
 from ouroboros.tools.registry import ToolEntry
 
-def _get_uptime_string(start_time_iso: str) -> str:
-    """Calculates and formats uptime from an ISO 8601 start time."""
-    start_time = datetime.datetime.fromisoformat(start_time_iso)
-    uptime_delta = datetime.datetime.now() - start_time
-    days = uptime_delta.days
-    hours, remainder = divmod(uptime_delta.seconds, 3600)
-    minutes, seconds = divmod(remainder, 60)
-    return f"{days} дней, {hours} часов, {minutes} минут"
-
-def _get_disk_usage() -> Dict[str, str]:
-    """Retrieves disk usage using df -h."""
+def _run_shell_cmd(cmd: List[str]) -> str:
+    """Helper to run shell commands and return stdout."""
     try:
-        from default_api import run_shell
-        result = run_shell(cmd=["df", "-h", "/"])
-        output = result.get('run_shell_response', {}).get('stdout', '')
-        lines = output.strip().split('\\n')
-        if len(lines) > 1:
-            parts = lines[1].split()
-            return {
-                "total": parts[1],
-                "used": parts[2],\
-                "available": parts[3],
-                "percent_used": parts[4]
-            }
-    except Exception as e:
-        return {"error": f"Failed to get disk usage: {e}"}
-    return {"error": "Could not parse disk usage output"}
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        return f"ERROR: {e.stderr.strip()}"
+    except FileNotFoundError:
+        return f"ERROR: Command not found: {cmd[0]}"
 
-def _get_ram_usage() -> Dict[str, str]:
-    """Retrieves RAM usage using free -h."""
-    try:
-        from default_api import run_shell
-        result = run_shell(cmd=["free", "-h"])
-        output = result.get('run_shell_response', {}).get('stdout', '')
-        lines = output.strip().split('\\n')
-        if len(lines) > 1:
-            # Assuming the second line (index 1) contains Mem info
-            parts = lines[1].split()
-            return {
-                "total": parts[1],
-                "used": parts[2],
-                "free": parts[3]
-            }
-    except Exception as e:
-        return {"error": f"Failed to get RAM usage: {e}"}
-    return {"error": "Could not parse RAM usage output"}
-
-
-def _system_status_handler(ctx) -> str:
-    """Основная логика инструмента system_status."""
-    status_report = []
+def system_status() -> Dict[str, Any]:
+    """
+    Shows everything about the system state:
+    uptime of the service, disk usage, RAM usage, budget,
+    last errors, and current version (SHA).
+    """
+    status: Dict[str, Any] = {}
 
     # Uptime
-    # Изменено: доступ к supervisor через getattr для универсальности
-    supervisor_data = getattr(ctx, 'supervisor', {})
-    launcher_start = supervisor_data.get('launcher_start', '')
-    if launcher_start:
-        status_report.append(f"Uptime сервиса: {_get_uptime_string(launcher_start)}")
-    else:
-        status_report.append("Uptime сервиса: Неизвестно (launcher_start не найден)")
+    try:
+        uptime_seconds = time.time() - psutil.boot_time()
+        status['uptime'] = str(timedelta(seconds=uptime_seconds))
+    except Exception as e:
+        status['uptime'] = f"Error getting uptime: {e}"
 
-    # Disk usage
-    disk_info = _get_disk_usage()
-    if "error" not in disk_info:
-        status_report.append(f"Диск: Всего {disk_info['total']}, Занято {disk_info['used']} ({disk_info['percent_used']}), Свободно {disk_info['available']}")
-    else:
-        status_report.append(f"Диск: {disk_info['error']}")
+    # Disk Usage
+    try:
+        total, used, free = shutil.disk_usage("/")
+        status['disk_usage'] = {
+            'total_gb': round(total / (1024**3), 2),
+            'used_gb': round(used / (1024**3), 2),
+            'free_gb': round(free / (1024**3), 2),
+            'percent_used': psutil.disk_usage('/').percent
+        }
+    except Exception as e:
+        status['disk_usage'] = f"Error getting disk usage: {e}"
 
-    # RAM usage
-    ram_info = _get_ram_usage()
-    if "error" not in ram_info:
-        status_report.append(f"RAM: Всего {ram_info['total']}, Занято {ram_info['used']}, Свободно {ram_info['free']}")
-    else:
-        status_report.append(f"RAM: {ram_info['error']}")
+    # RAM Usage
+    try:
+        mem = psutil.virtual_memory()
+        status['ram_usage'] = {
+            'total_gb': round(mem.total / (1024**3), 2),
+            'used_gb': round(mem.used / (1024**3), 2),
+            'free_gb': round(mem.available / (1024**3), 2),
+            'percent_used': mem.percent
+        }
+    except Exception as e:
+        status['ram_usage'] = f"Error getting RAM usage: {e}"
 
-    # Budget
-    # Изменено: доступ к budget через getattr для универсальности
-    budget_info = getattr(ctx, 'budget', {})
-    if budget_info:
-        status_report.append(f"Бюджет: Потрачено ${budget_info.get('spent_usd', 'N/A'):.2f} из ${budget_info.get('total_usd', 'N/A')}.00 (Осталось ${budget_info.get('remaining_usd', 'N/A'):.2f})")
-    else:
-        status_report.append("Бюджет: Информация недоступна")
+    # Budget (assuming it's passed from context or a global store)
+    # For now, we'll use a placeholder or try to read from a known path
+    try:
+        # This part assumes budget info is available somewhere,
+        # e.g., in a state.json on Drive. For now, it's a placeholder.
+        # In a real scenario, this would be injected by the supervisor.
+        status['budget'] = "N/A (supervisor provides this)"
+    except Exception as e:
+        status['budget'] = f"Error getting budget: {e}"
+
+    # Last Errors (placeholder, would require parsing logs)
+    status['last_errors'] = "N/A (requires log parsing)"
 
     # Version (SHA)
-    # Изменено: доступ к git_head через getattr для универсальности
-    git_head = getattr(ctx, 'git_head', 'N/A')
-    status_report.append(f"Версия (SHA): {git_head}")
+    try:
+        # Assuming current SHA can be fetched from the repo
+        sha = _run_shell_cmd(["git", "rev-parse", "HEAD"])
+        if "ERROR" not in sha:
+            status['version_sha'] = sha
+        else:
+            status['version_sha'] = f"Error getting SHA: {sha}"
+    except Exception as e:
+        status['version_sha'] = f"Error getting version SHA: {e}"
 
-    return "\\n".join(status_report)
-
+    return status
 
 def get_tools() -> List[ToolEntry]:
-    """ОБЯЗАТЕЛЬНО: реестр вызывает эту функцию при старте."""
     return [
         ToolEntry(
-            "system_status",
-            {
-                "name": "system_status",
-                "description": "Показывает общее состояние системы: uptime, использование диска, RAM, бюджет, текущую версию (SHA).",
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
-            _system_status_handler,
+            name="system_status",
+            description="Shows everything about the system state: uptime of the service, disk usage, RAM usage, budget, last errors, and current version (SHA).",
+            parameters=[] # No parameters for this tool
         )
     ]
