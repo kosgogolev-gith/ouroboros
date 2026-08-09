@@ -1,80 +1,133 @@
 import requests
-from datetime import datetime
-from typing import List, Callable, Any
-from xml.etree import ElementTree as ET
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Any
 
-class CurrencyConverterError(Exception):
-    """Custom exception for currency conversion errors."""
-    pass
-
-def _fetch_cbr_rates(date: str = None) -> dict:
-    """Fetches currency rates from the CBR API for a given date."""
-    if date:
-        try:
-            # CBR API expects DD/MM/YYYY
-            date_obj = datetime.strptime(date, "%Y-%m-%d")
-            cbr_date = date_obj.strftime("%d/%m/%Y")
-            url = f"https://www.cbr.ru/scripts/XML_daily.asp?date_req={cbr_date}"
-        except ValueError:
-            raise CurrencyConverterError("Неверный формат даты. Используйте YYYY-MM-DD.")
+def get_currency_rate(currency_code: str, date: Optional[str] = None) -> Optional[float]:
+    """
+    Получает курс валюты относительно российского рубля на заданную дату.
+    :param currency_code: Трехбуквенный код валюты (например, "USD", "EUR").
+    :param date: Дата в формате "DD/MM/YYYY". Если не указана, используется текущая дата.
+    :return: Курс валюты в рублях за единицу (или за номинал), либо None, если не найдено.
+    """
+    if date is None:
+        date_obj = datetime.now()
     else:
-        url = "https://www.cbr.ru/scripts/XML_daily.asp"
+        date_obj = datetime.strptime(date, "%d/%m/%Y")
 
+    url = f"https://www.cbr.ru/scripts/XML_daily.asp?date_req={date_obj.strftime('%d/%m/%Y')}"
+    
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status() # Raise an exception for HTTP errors
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
-        raise CurrencyConverterError(f"Ошибка при запросе к API ЦБ РФ: {e}")
+        print(f"Ошибка при запросе к ЦБ РФ: {e}")
+        return None
 
-    try:
-        root = ET.fromstring(response.content)
-    except ET.ParseError as e:
-        raise CurrencyConverterError(f"Ошибка при парсинге XML ответа от ЦБ РФ: {e}")
-
-    rates = {"RUB": {"Value": 1.0, "Nominal": 1}} # Add RUB as base currency
-
+    root = ET.fromstring(response.content)
     for valute in root.findall('Valute'):
         char_code = valute.find('CharCode').text
-        nominal = int(valute.find('Nominal').text)
-        value = float(valute.find('Value').text.replace(',', '.'))
-        rates[char_code] = {"Value": value, "Nominal": nominal}
-    return rates
+        if char_code == currency_code:
+            value_str = valute.find('Value').text
+            nominal_str = valute.find('Nominal').text
+            if value_str and nominal_str:
+                value = float(value_str.replace(',', '.'))
+                nominal = int(nominal_str)
+                return value / nominal
+    return None
 
-def cbr_currency_converter(amount: float, from_currency: str, to_currency: str, date: str = None) -> float:
+def cbr_currency_converter(
+    amount: float,
+    from_currency: str,
+    to_currency: str,
+    date: Optional[str] = None
+) -> Dict[str, Any]:
     """
-    Конвертирует сумму из одной валюты в другую через API ЦБ РФ.
-    Поддерживает RUB как базовую валюту.
-
-    Args:
-        amount (float): Сумма для конвертации.
-        from_currency (str): Исходная валюта (например, "USD", "EUR", "RUB").
-        to_currency (str): Целевая валюта (например, "USD", "EUR", "RUB").
-        date (str, optional): Дата для получения курса в формате YYYY-MM-DD. По умолчанию - текущая дата.
-
-    Returns:
-        float: Сконвертированная сумма.
-
-    Raises:
-        CurrencyConverterError: Если валюта не найдена, произошла ошибка сети или парсинга.
+    Конвертирует заданную сумму из одной валюты в другую, используя курсы ЦБ РФ.
+    Поддерживает конвертацию через рубль.
+    :param amount: Сумма для конвертации.
+    :param from_currency: Трехбуквенный код исходной валюты (например, "USD", "EUR", "RUB").
+    :param to_currency: Трехбуквенный код целевой валюты (например, "USD", "EUR", "RUB").
+    :param date: Дата в формате "DD/MM/YYYY". Если не указана, используется текущая дата.
+    :return: Словарь с результатом конвертации и информацией о курсах.
     """
-    from_currency = from_currency.upper()
-    to_currency = to_currency.upper()
+    result: Dict[str, Any] = {
+        "success": False,
+        "amount": amount,
+        "from_currency": from_currency,
+        "to_currency": to_currency,
+        "converted_amount": None,
+        "rate": None,
+        "message": "",
+        "date": date if date else datetime.now().strftime("%d/%m/%Y")
+    }
 
-    rates = _fetch_cbr_rates(date)
+    if from_currency == to_currency:
+        result["converted_amount"] = amount
+        result["rate"] = 1.0
+        result["success"] = True
+        result["message"] = "Исходная и целевая валюты совпадают."
+        return result
 
-    if from_currency not in rates:
-        raise CurrencyConverterError(f"Исходная валюта '{from_currency}' не найдена.")
-    if to_currency not in rates:
-        raise CurrencyConverterError(f"Целевая валюта '{to_currency}' не найдена.")
+    # Обработка RUB как одной из валют
+    if from_currency == "RUB":
+        rate_to = get_currency_rate(to_currency, date)
+        if rate_to is None:
+            result["message"] = f"Не удалось получить курс {to_currency} на {result['date']}."
+            return result
+        result["converted_amount"] = amount / rate_to
+        result["rate"] = 1 / rate_to
+        result["success"] = True
+        result["message"] = f"Конвертация RUB в {to_currency} на {result['date']}."
+        return result
+    
+    if to_currency == "RUB":
+        rate_from = get_currency_rate(from_currency, date)
+        if rate_from is None:
+            result["message"] = f"Не удалось получить курс {from_currency} на {result['date']}."
+            return result
+        result["converted_amount"] = amount * rate_from
+        result["rate"] = rate_from
+        result["success"] = True
+        result["message"] = f"Конвертация {from_currency} в RUB на {result['date']}."
+        return result
 
-    from_rate = rates[from_currency]["Value"] / rates[from_currency]["Nominal"]
-    to_rate = rates[to_currency]["Value"] / rates[to_currency]["Nominal"]
+    # Конвертация через RUB (из from_currency в RUB, затем из RUB в to_currency)
+    rate_from_to_rub = get_currency_rate(from_currency, date)
+    if rate_from_to_rub is None:
+        result["message"] = f"Не удалось получить курс {from_currency} на {result['date']}."
+        return result
 
-    # Convert to RUB first, then to target currency
-    amount_in_rub = amount * from_rate
-    converted_amount = amount_in_rub / to_rate
+    amount_in_rub = amount * rate_from_to_rub
 
-    return converted_amount
+    rate_to_from_rub = get_currency_rate(to_currency, date)
+    if rate_to_from_rub is None:
+        result["message"] = f"Не удалось получить курс {to_currency} на {result['date']}."
+        return result
 
-def get_tools() -> List[Callable[..., Any]]:
-    return [cbr_currency_converter]
+    converted_amount = amount_in_rub / rate_to_from_rub
+    effective_rate = (amount * rate_from_to_rub) / (amount_in_rub / rate_to_from_rub) if amount_in_rub != 0 else 0
+    
+    result["converted_amount"] = converted_amount
+    result["rate"] = rate_from_to_rub / rate_to_from_rub
+    result["success"] = True
+    result["message"] = f"Конвертация {from_currency} в {to_currency} через RUB на {result['date']}."
+    return result
+
+def get_tools() -> List[Dict[str, Any]]:
+    return [
+        {
+            "name": "cbr_currency_converter",
+            "description": "Конвертирует заданную сумму из одной валюты в другую (или в рубли), используя курсы ЦБ РФ. Поддерживает текущие и исторические курсы. Валюты указываются трехбуквенным кодом (например, USD, EUR, RUB).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "amount": {"type": "number", "description": "Сумма для конвертации."},
+                    "from_currency": {"type": "string", "description": "Трехбуквенный код исходной валюты (например, 'USD', 'EUR', 'RUB')."},
+                    "to_currency": {"type": "string", "description": "Трехбуквенный код целевой валюты (например, 'USD', 'EUR', 'RUB')."},
+                    "date": {"type": "string", "description": "Дата конвертации в формате 'DD/MM/YYYY'. Если не указана, используется текущая дата."}
+                },
+                "required": ["amount", "from_currency", "to_currency"]
+            }
+        }
+    ]
