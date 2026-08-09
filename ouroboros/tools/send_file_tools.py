@@ -128,8 +128,8 @@ def _drive_to_telegram(ctx, drive_path: str, caption: str = "") -> str:
     """
     try:
         # Step 1: read from Drive
-        from ouroboros.tools.core import _drive_read
-        text = _drive_read(ctx, path=drive_path)
+        from ouroboros.integrations.google.drive import read_file as _drive_read_file
+        text = _drive_read_file(drive_path)
         if not text or text.startswith("❌") or "not found" in text.lower():
             return f"❌ Файл не найден на Drive: {drive_path}"
 
