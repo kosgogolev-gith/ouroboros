@@ -1,71 +1,116 @@
-import xml.etree.ElementTree as ET
 import requests
-from typing import List, Dict, Optional
+from xml.etree import ElementTree as ET
 from datetime import datetime, timedelta
+from typing import List, Dict, Optional
 
-class CBRCurrencyConverter:
-    BASE_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
+class CurrencyConverter:
+    def __init__(self):
+        self.cbr_url = "https://www.cbr.ru/scripts/XML_daily.asp"
+        self.currency_codes: Dict[str, str] = {}
+        self._load_currency_codes()
 
-    def _get_rates_for_date(self, date: Optional[str] = None) -> Dict[str, float]:
+    def _load_currency_codes(self):
+        # Initial load of currency codes
+        try:
+            response = requests.get(self.cbr_url, timeout=5)
+            response.raise_for_status()
+            tree = ET.fromstring(response.content)
+            for valute in tree.findall('Valute'):
+                char_code = valute.find('CharCode').text
+                name = valute.find('Name').text
+                if char_code and name:
+                    self.currency_codes[char_code.upper()] = name
+        except requests.exceptions.RequestException as e:
+            print(f"Ошибка при загрузке кодов валют: {e}")
+            # Fallback for common currencies if initial load fails
+            self.currency_codes = {
+                "USD": "Доллар США",
+                "EUR": "Евро",
+                "CNY": "Китайский юань",
+                "GBP": "Фунт стерлингов",
+                "JPY": "Японская иена",
+                "RUB": "Российский рубль" # RUB is handled as base, not fetched from CBR directly
+            }
+
+    def _fetch_rates_for_date(self, date: Optional[str] = None) -> Dict[str, float]:
+        rates: Dict[str, float] = {}
+        target_date_obj: datetime
         if date:
             try:
-                # Ensure date is in DD.MM.YYYY format
-                datetime.strptime(date, "%Y-%m-%d").strftime("%d.%m.%Y")
+                target_date_obj = datetime.strptime(date, '%Y-%m-%d')
             except ValueError:
                 raise ValueError("Неверный формат даты. Используйте YYYY-MM-DD.")
-            url = f"{self.BASE_URL}?date_req={datetime.strptime(date, '%Y-%m-%d').strftime('%d.%m.%Y')}"
         else:
-            url = self.BASE_URL
+            target_date_obj = datetime.now()
+
+        # CBR API requires date in DD/MM/YYYY format
+        cbr_date = target_date_obj.strftime('%d/%m/%Y')
+        params = {'date_req': cbr_date}
 
         try:
-            response = requests.get(url, timeout=5)
-            response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
-        except requests.exceptions.RequestException as e:
-            raise ConnectionError(f"Ошибка при получении данных от ЦБ РФ: {e}")
+            response = requests.get(self.cbr_url, params=params, timeout=10)
+            response.raise_for_status()
+            tree = ET.fromstring(response.content)
+            for valute in tree.findall('Valute'):
+                char_code = valute.find('CharCode').text
+                value_str = valute.find('Value').text
+                nominal_str = valute.find('Nominal').text
 
-        root = ET.fromstring(response.content)
-        rates = {"RUB": 1.0}  # Add Ruble as a base currency
-        for valute in root.findall("Valute"):
-            char_code = valute.find("CharCode").text
-            value_str = valute.find("Value").text.replace(",", ".")
-            nominal_str = valute.find("Nominal").text.replace(",", ".")
-            rates[char_code] = float(value_str) / float(nominal_str)
+                if char_code and value_str and nominal_str:
+                    try:
+                        value = float(value_str.replace(',', '.'))
+                        nominal = int(nominal_str)
+                        rates[char_code.upper()] = value / nominal
+                    except (ValueError, TypeError) as e:
+                        print(f"Ошибка парсинга валюты {char_code}: {e}")
+            rates['RUB'] = 1.0  # Add Russian Ruble as base currency
+        except requests.exceptions.RequestException as e:
+            print(f"Ошибка при получении курсов ЦБ РФ для даты {cbr_date}: {e}")
+            raise
+        except ET.ParseError as e:
+            print(f"Ошибка парсинга XML от ЦБ РФ для даты {cbr_date}: {e}")
+            raise
         return rates
 
-    def convert(self, amount: float, from_currency: str, to_currency: str, date: Optional[str] = None) -> float:
+    def convert_currency(self, amount: float, from_currency: str, to_currency: str, date: Optional[str] = None) -> float:
         from_currency = from_currency.upper()
         to_currency = to_currency.upper()
 
         if from_currency == to_currency:
             return amount
 
-        rates = self._get_rates_for_date(date)
+        rates = self._fetch_rates_for_date(date)
 
         if from_currency not in rates:
-            raise ValueError(f"Валюта источника '{from_currency}' не найдена.")
+            raise ValueError(f"Валюта '{from_currency}' не найдена в данных ЦБ РФ.")
         if to_currency not in rates:
-            raise ValueError(f"Валюта назначения '{to_currency}' не найдена.")
+            raise ValueError(f"Валюта '{to_currency}' не найдена в данных ЦБ РФ.")
 
-        # Convert to RUB first, then to target currency
         amount_in_rub = amount * rates[from_currency]
         converted_amount = amount_in_rub / rates[to_currency]
         return converted_amount
 
-def get_tools() -> List[Dict]:
-    converter = CBRCurrencyConverter()
-    return [
-        {
-            "name": "currency_convert",
-            "description": "Конвертирует сумму из одной валюты в другую, используя курсы ЦБ РФ. Дата по умолчанию - текущая.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "amount": {"type": "number", "description": "Сумма для конвертации"},
-                    "from_currency": {"type": "string", "description": "Код исходной валюты (например, USD, EUR, RUB)"},
-                    "to_currency": {"type": "string", "description": "Код целевой валюты (например, USD, EUR, RUB)"},
-                    "date": {"type": "string", "format": "date", "description": "Дата курсов в формате YYYY-MM-DD (опционально, по умолчанию - текущая)"}
-                },
-                "required": ["amount", "from_currency", "to_currency"]
-            }
-        }
-    ]
+converter_instance = CurrencyConverter()
+
+def cbr_currency_converter(amount: float, from_currency: str, to_currency: str, date: Optional[str] = None) -> float:
+    """
+    Конвертирует сумму из одной валюты в другую, используя курсы ЦБ РФ.
+    Поддерживает конвертацию в/из российского рубля.
+
+    Args:
+        amount (float): Сумма для конвертации.
+        from_currency (str): Исходная валюта (например, "USD", "EUR", "CNY", "RUB").
+        to_currency (str): Целевая валюта (например, "USD", "EUR", "CNY", "RUB").
+        date (Optional[str]): Дата для получения курса в формате YYYY-MM-DD. По умолчанию - текущая дата.
+
+    Returns:
+        float: Сконвертированная сумма.
+
+    Raises:
+        ValueError: Если указаны неверные валюты или формат даты.
+        requests.exceptions.RequestException: В случае проблем с доступом к API ЦБ РФ.
+    """
+    return converter_instance.convert_currency(amount, from_currency, to_currency, date)
+
+def get_tools() -> List:
+    return [cbr_currency_converter]
