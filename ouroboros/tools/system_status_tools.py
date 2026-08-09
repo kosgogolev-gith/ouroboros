@@ -22,12 +22,12 @@ def _get_disk_usage() -> Dict[str, str]:
         from default_api import run_shell
         result = run_shell(cmd=["df", "-h", "/"])
         output = result.get('run_shell_response', {}).get('stdout', '')
-        lines = output.strip().split('\n')
+        lines = output.strip().split('\\n')
         if len(lines) > 1:
             parts = lines[1].split()
             return {
                 "total": parts[1],
-                "used": parts[2],
+                "used": parts[2],\
                 "available": parts[3],
                 "percent_used": parts[4]
             }
@@ -41,7 +41,7 @@ def _get_ram_usage() -> Dict[str, str]:
         from default_api import run_shell
         result = run_shell(cmd=["free", "-h"])
         output = result.get('run_shell_response', {}).get('stdout', '')
-        lines = output.strip().split('\n')
+        lines = output.strip().split('\\n')
         if len(lines) > 1:
             # Assuming the second line (index 1) contains Mem info
             parts = lines[1].split()
@@ -60,8 +60,9 @@ def _system_status_handler(ctx) -> str:
     status_report = []
 
     # Uptime
-    # Изменено: доступ к supervisor из корневого ctx
-    launcher_start = ctx.get('supervisor', {}).get('launcher_start', '')
+    # Изменено: доступ к supervisor через getattr для универсальности
+    supervisor_data = getattr(ctx, 'supervisor', {})
+    launcher_start = supervisor_data.get('launcher_start', '')
     if launcher_start:
         status_report.append(f"Uptime сервиса: {_get_uptime_string(launcher_start)}")
     else:
@@ -82,19 +83,19 @@ def _system_status_handler(ctx) -> str:
         status_report.append(f"RAM: {ram_info['error']}")
 
     # Budget
-    # Изменено: доступ к budget из корневого ctx
-    budget_info = ctx.get('budget', {})
+    # Изменено: доступ к budget через getattr для универсальности
+    budget_info = getattr(ctx, 'budget', {})
     if budget_info:
         status_report.append(f"Бюджет: Потрачено ${budget_info.get('spent_usd', 'N/A'):.2f} из ${budget_info.get('total_usd', 'N/A')}.00 (Осталось ${budget_info.get('remaining_usd', 'N/A'):.2f})")
     else:
         status_report.append("Бюджет: Информация недоступна")
 
     # Version (SHA)
-    # Изменено: доступ к git_head из корневого ctx
-    git_head = ctx.get('git_head', 'N/A')
+    # Изменено: доступ к git_head через getattr для универсальности
+    git_head = getattr(ctx, 'git_head', 'N/A')
     status_report.append(f"Версия (SHA): {git_head}")
 
-    return "\n".join(status_report)
+    return "\\n".join(status_report)
 
 
 def get_tools() -> List[ToolEntry]:
@@ -113,4 +114,3 @@ def get_tools() -> List[ToolEntry]:
             _system_status_handler,
         )
     ]
-
