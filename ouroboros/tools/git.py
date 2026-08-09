@@ -153,6 +153,29 @@ def _repo_write_commit(ctx: ToolContext, path: str, content: str, commit_message
             write_text(ctx.repo_path(path), content)
         except Exception as e:
             return f"⚠️ FILE_WRITE_ERROR: {e}"
+
+        # ── py_compile guard ──────────────────────────────────────────────
+        if str(path).endswith(".py"):
+            import subprocess as _sp, sys as _sys
+            check = _sp.run(
+                [_sys.executable, "-m", "py_compile", str(ctx.repo_path(path))],
+                capture_output=True, text=True, timeout=10
+            )
+            if check.returncode != 0:
+                # Restore original file from git before returning error
+                try:
+                    _sp.run(["git", "checkout", "--", safe_relpath(path)],
+                            cwd=ctx.repo_dir, timeout=5)
+                except Exception:
+                    pass
+                err = check.stderr.strip().split("\n")[0][:200]
+                return (
+                    f"❌ SYNTAX ERROR in {path} — commit blocked.\n"
+                    f"{err}\n"
+                    f"Fix the syntax error and try again."
+                )
+        # ─────────────────────────────────────────────────────────────────
+
         try:
             run_cmd(["git", "add", safe_relpath(path)], cwd=ctx.repo_dir)
         except Exception as e:
