@@ -17,7 +17,7 @@ def _run_shell_cmd(cmd: List[str]) -> str:
     except FileNotFoundError:
         return f"ERROR: Command not found: {cmd[0]}"
 
-def system_status() -> Dict[str, Any]:
+def system_status(ctx=None) -> str:
     """
     Shows everything about the system state:
     uptime of the service, disk usage, RAM usage, budget,
