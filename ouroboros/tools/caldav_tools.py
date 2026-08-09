@@ -85,7 +85,9 @@ def _icloud_get_events(ctx, calendar_name: str = "", days_ahead: int = 1,
                             start_str = "?"
                         location = str(comp.get("LOCATION", ""))
                         loc_str = f" 📍{location}" if location else ""
-                        all_events.append((dtstart.dt if dtstart else now, f"• **{start_str}** — {summary}{loc_str} [{name}]"))
+                        uid = str(comp.get("UID", ""))
+                        uid_str = f"\n  `id:{uid}`" if uid else ""
+                        all_events.append((dtstart.dt if dtstart else now, f"• **{start_str}** — {summary}{loc_str} [{name}]{uid_str}", uid, ev))
                     except Exception:
                         continue
             except Exception:
@@ -99,8 +101,8 @@ def _icloud_get_events(ctx, calendar_name: str = "", days_ahead: int = 1,
         all_events.sort(key=lambda x: x[0] if hasattr(x[0], 'hour') else
                         datetime.combine(x[0], datetime.min.time()).replace(tzinfo=timezone.utc))
         lines = [f"📅 **iCloud события на ближайшие {days_ahead} дн.:**"]
-        for _, line in all_events[:max_results]:
-            lines.append(line)
+        for item in all_events[:max_results]:
+            lines.append(item[1])
         return "\n".join(lines)
 
     except Exception as e:
@@ -162,6 +164,38 @@ def _icloud_create_event(ctx, title: str, start_datetime: str, end_datetime: str
 
     except Exception as e:
         return f"❌ Ошибка создания события iCloud: {e}"
+
+
+def _icloud_delete_event(ctx, event_id: str, calendar_name: str = "") -> str:
+    """Delete an iCloud event by UID."""
+    try:
+        client = _get_caldav_client()
+        principal = client.principal()
+        calendars = principal.calendars()
+
+        for cal in calendars:
+            name = cal.get_display_name() or ""
+            if calendar_name and calendar_name.lower() not in name.lower():
+                continue
+            if "напоминани" in name.lower():
+                continue
+            try:
+                events = cal.events()
+                for ev in events:
+                    try:
+                        comp = ev.icalendar_component
+                        uid = str(comp.get("UID", ""))
+                        summary = str(comp.get("SUMMARY", ""))
+                        if uid == event_id or event_id in uid:
+                            ev.delete()
+                            return f"✅ Событие удалено: **{summary}** (id: {uid})"
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return f"❌ Событие с id `{event_id}` не найдено."
+    except Exception as e:
+        return f"❌ Ошибка удаления события iCloud: {e}"
 
 
 def get_tools() -> List:
@@ -229,5 +263,21 @@ def get_tools() -> List:
                 },
             },
             _icloud_create_event,
+        ),
+        ToolEntry(
+            'icloud_delete_event',
+            {
+                'name': 'icloud_delete_event',
+                'description': 'Delete an iCloud Calendar event by UID (shown as id: in icloud_get_events output).',
+                'parameters': {
+                    'type': 'object',
+                    'properties': {
+                        'event_id': {'type': 'string', 'description': 'Event UID from icloud_get_events output'},
+                        'calendar_name': {'type': 'string', 'default': ''},
+                    },
+                    'required': ['event_id'],
+                },
+            },
+            _icloud_delete_event,
         ),
     ]
