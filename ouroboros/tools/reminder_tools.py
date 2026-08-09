@@ -41,7 +41,7 @@ def _reminder_handler(ctx, text: str, delay_minutes: Optional[int] = None, at: O
     # The supervisor will process send_owner_message with a delay argument
     delay_seconds = int((reminder_time - current_time).total_seconds())
     
-    ctx.send_owner_message(text=f"⏰ Напоминание: {text}", delay=delay_seconds)
+    ctx.send_owner_message(text=f"⏰ Напоминание: {text}", reason="reminder", delay=delay_seconds) # <-- Используем ctx.send_owner_message с reason
     
     return f"⏰ Напоминание установлено: \"{text}\" {delay_message}."
 
@@ -64,7 +64,7 @@ def get_tools() -> List[ToolEntry]:
                             "type": "integer",
                             "description": "Задержка в минутах до отправки напоминания.",
                             "minimum": 1
-                        },
+                        },\
                         "at": {
                             "type": "string",
                             "description": "Конкретное время для напоминания (HH:MM или YYYY-MM-DDTHH:MM). Если время в HH:MM уже прошло сегодня, напоминание будет установлено на завтра."
@@ -72,7 +72,7 @@ def get_tools() -> List[ToolEntry]:
                     },
                     "required": ["text"],
                 },
-            },
+            },\
             _reminder_handler,
         )
     ]
