@@ -229,18 +229,18 @@ def test_function_count_reasonable():
     parse_errors = []
 
     for file_path in repo_root.glob("ouroboros/**/*.py"):
-            if "ouroboros/tools" in str(file_path):
-                continue  # Skip tools, as they might have many small functions
+        if "ouroboros/tools" in str(file_path):
+            continue  # Skip tools, as they might have many small functions
 
-            try:
-                tree = ast.parse(file_path.read_text())
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        function_count += 1
-            except SyntaxError:
-                parse_errors.append(f"SyntaxError in {file_path.relative_to(repo_root)}")
-            except Exception as e:
-                parse_errors.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
+        try:
+            tree = ast.parse(file_path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    function_count += 1
+        except SyntaxError:
+            parse_errors.append(f"SyntaxError in {file_path.relative_to(repo_root)}")
+        except Exception as e:
+            parse_errors.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-        assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
+    assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
     assert function_count <= 400, f"Too many functions ({function_count}): consider refactoring or consolidating."
