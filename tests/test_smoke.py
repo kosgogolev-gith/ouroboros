@@ -6,6 +6,7 @@ from pathlib import Path
 import ast
 import sys
 from unittest.mock import patch, MagicMock # Import patch and MagicMock
+from typing import Optional # Import Optional
 
 # Mock TelegramGateway before importing anything that depends on it
 class MockTelegramGateway:
@@ -120,113 +121,113 @@ with patch.dict('sys.modules', {'ouroboros.supervisor.telegram_gateway': MagicMo
     MAX_FUNCTION_LINES = 150
     MAX_FUNCTION_PARAMS = 8
 
-    def test_imports():
-        """Verify that essential modules can be imported without errors."""
-        assert LLMClient is not None, "LLMClient should be importable"
-        assert web_search_tool is not None, "web_search_tool should be importable"
+def test_imports():
+    """Verify that essential modules can be imported without errors."""
+    assert LLMClient is not None, "LLMClient should be importable"
+    assert web_search_tool is not None, "web_search_tool should be importable"
 
-    def test_ollama_client_init():
-        """Ensure LLMClient can be initialized without crashing."""
+def test_ollama_client_init():
+    """Ensure LLMClient can be initialized without crashing."""
+    try:
+        client = LLMClient()
+        assert client is not None, "LLMClient should be initialized"
+    except Exception as e:
+        assert False, f"LLMClient initialization failed: {e}"
+
+def test_memory_chat_history_empty():
+    """Verify chat history can be retrieved, even if empty."""
+    result = default_api.chat_history(count=1)
+    assert isinstance(result, dict), "chat_history should return a dictionary"
+    assert "messages" in result, "chat_history result should contain 'messages'"
+    assert len(result["messages"]) == 0, "Initially, chat history should be empty"
+
+@pytest.mark.skip(reason="depends on MockDefaultAPI which is not available in VPS env")
+def test_scratchpad_update():
+    """Ensure scratchpad can be updated."""
+    test_content = "This is a test scratchpad entry."
+    result = default_api.update_scratchpad(content=test_content)
+    assert isinstance(result, dict), "update_scratchpad should return a dictionary"
+    assert "message" in result, "update_scratchpad result should contain 'message'"
+    assert "OK: scratchpad updated" in result["message"], "update_scratchpad success message expected"
+
+    # Verify content by reading it (this part needs to be aware of the mock or tempfile)
+    # Since MockDefaultAPI uses tempfile, we need to adapt the check
+    with tempfile.TemporaryDirectory() as tmpdir:
+        original_drive_root = os.environ.get("DRIVE_ROOT")
+        os.environ["DRIVE_ROOT"] = tmpdir
         try:
-            client = LLMClient()
-            assert client is not None, "LLMClient should be initialized"
+            scratchpad_path = Path(tmpdir) / "memory" / "scratchpad.md"
+            if scratchpad_path.exists():
+                read_content = scratchpad_path.read_text()
+                assert read_content == test_content, "Scratchpad content should match what was written"
+            else:
+                assert False, "Scratchpad file was not created by mock update_scratchpad"
+        finally:
+            if original_drive_root:
+                os.environ["DRIVE_ROOT"] = original_drive_root
+            else:
+                if "DRIVE_ROOT" in os.environ:
+                    del os.environ["DRIVE_ROOT"]
+
+def test_no_hardcoded_replies():
+    """Ensure no hardcoded 'I am a bot' or similar in prompts/SYSTEM.md."""
+    system_prompt_path = Path("prompts/SYSTEM.md")
+    if not system_prompt_path.exists():
+        assert False, f"prompts/SYSTEM.MD not found at {system_prompt_path.absolute()}"
+
+    content = system_prompt_path.read_text()
+    assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \
+        "SYSTEM.MD should not contain hardcoded 'I am a bot/service/assistant' replies."
+
+@pytest.mark.skip(reason="loop.py core functions exceed param limit by design — not a bug")
+def test_no_extremely_oversized_functions():
+    """
+    Checks for functions that exceed MAX_FUNCTION_LINES or MAX_FUNCTION_PARAMS in the codebase.
+    This helps enforce Principle 5: Minimalism, by encouraging decomposition and readability.
+    """
+    repo_root = Path(__file__).parent.parent
+    violations = []
+
+    for file_path in repo_root.glob("ouroboros/**/*.py"):
+        if "ouroboros/tools" in str(file_path):
+            continue  # Skip tools for this specific check, they might be larger by design
+
+        try:
+            tree = ast.parse(file_path.read_text())
+            for node in ast.walk(tree):
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    function_name = node.name
+                    lines = node.body[-1].lineno - node.body[0].lineno + 1 if node.body else 0
+                    params = len(node.args.args)
+
+                    if lines > MAX_FUNCTION_LINES:
+                        violations.append(
+                            f"{file_path.relative_to(repo_root)}:{function_name} "
+                            f"exceeds {MAX_FUNCTION_LINES} lines ({lines} lines)"
+                        )
+                    if params > MAX_FUNCTION_PARAMS:
+                        violations.append(
+                            f"{file_path.relative_to(repo_root)}:{function_name} "
+                            f"exceeds {MAX_FUNCTION_PARAMS} parameters ({params} params)"
+                        )
+        except SyntaxError:
+            violations.append(f"SyntaxError in {file_path.relative_to(repo_root)}")
         except Exception as e:
-            assert False, f"LLMClient initialization failed: {e}"
+            violations.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-    def test_memory_chat_history_empty():
-        """Verify chat history can be retrieved, even if empty."""
-        result = default_api.chat_history(count=1)
-        assert isinstance(result, dict), "chat_history should return a dictionary"
-        assert "messages" in result, "chat_history result should contain 'messages'"
-        assert len(result["messages"]) == 0, "Initially, chat history should be empty"
+    assert len(violations) == 0, \
+        f"Codebase contains oversized functions or methods:\n" + "\n".join(violations)
 
-    @pytest.mark.skip(reason="depends on MockDefaultAPI which is not available in VPS env")
-    def test_scratchpad_update():
-        """Ensure scratchpad can be updated."""
-        test_content = "This is a test scratchpad entry."
-        result = default_api.update_scratchpad(content=test_content)
-        assert isinstance(result, dict), "update_scratchpad should return a dictionary"
-        assert "message" in result, "update_scratchpad result should contain 'message'"
-        assert "OK: scratchpad updated" in result["message"], "update_scratchpad success message expected"
+def test_function_count_reasonable():
+    """
+    Checks the total number of functions and methods in the codebase.
+    This helps ensure overall codebase complexity remains manageable.
+    """
+    repo_root = Path(__file__).parent.parent
+    function_count = 0
+    parse_errors = []
 
-        # Verify content by reading it (this part needs to be aware of the mock or tempfile)
-        # Since MockDefaultAPI uses tempfile, we need to adapt the check
-        with tempfile.TemporaryDirectory() as tmpdir:
-            original_drive_root = os.environ.get("DRIVE_ROOT")
-            os.environ["DRIVE_ROOT"] = tmpdir
-            try:
-                scratchpad_path = Path(tmpdir) / "memory" / "scratchpad.md"
-                if scratchpad_path.exists():
-                    read_content = scratchpad_path.read_text()
-                    assert read_content == test_content, "Scratchpad content should match what was written"
-                else:
-                    assert False, "Scratchpad file was not created by mock update_scratchpad"
-            finally:
-                if original_drive_root:
-                    os.environ["DRIVE_ROOT"] = original_drive_root
-                else:
-                    if "DRIVE_ROOT" in os.environ:
-                        del os.environ["DRIVE_ROOT"]
-
-    def test_no_hardcoded_replies():
-        """Ensure no hardcoded 'I am a bot' or similar in prompts/SYSTEM.md."""
-        system_prompt_path = Path("prompts/SYSTEM.md")
-        if not system_prompt_path.exists():
-            assert False, f"prompts/SYSTEM.MD not found at {system_prompt_path.absolute()}"
-
-        content = system_prompt_path.read_text()
-        assert not re.search(r"I am a (bot|service|assistant)\.?", content, re.IGNORECASE), \
-            "SYSTEM.MD should not contain hardcoded 'I am a bot/service/assistant' replies."
-
-    @pytest.mark.skip(reason="loop.py core functions exceed param limit by design — not a bug")
-    def test_no_extremely_oversized_functions():
-        """
-        Checks for functions that exceed MAX_FUNCTION_LINES or MAX_FUNCTION_PARAMS in the codebase.
-        This helps enforce Principle 5: Minimalism, by encouraging decomposition and readability.
-        """
-        repo_root = Path(__file__).parent.parent
-        violations = []
-
-        for file_path in repo_root.glob("ouroboros/**/*.py"):
-            if "ouroboros/tools" in str(file_path):
-                continue  # Skip tools for this specific check, they might be larger by design
-
-            try:
-                tree = ast.parse(file_path.read_text())
-                for node in ast.walk(tree):
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        function_name = node.name
-                        lines = node.body[-1].lineno - node.body[0].lineno + 1 if node.body else 0
-                        params = len(node.args.args)
-
-                        if lines > MAX_FUNCTION_LINES:
-                            violations.append(
-                                f"{file_path.relative_to(repo_root)}:{function_name} "
-                                f"exceeds {MAX_FUNCTION_LINES} lines ({lines} lines)"
-                            )
-                        if params > MAX_FUNCTION_PARAMS:
-                            violations.append(
-                                f"{file_path.relative_to(repo_root)}:{function_name} "
-                                f"exceeds {MAX_FUNCTION_PARAMS} parameters ({params} params)"
-                            )
-            except SyntaxError:
-                violations.append(f"SyntaxError in {file_path.relative_to(repo_root)}")
-            except Exception as e:
-                violations.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
-
-        assert len(violations) == 0, \
-            f"Codebase contains oversized functions or methods:\n" + "\n".join(violations)
-
-    def test_function_count_reasonable():
-        """
-        Checks the total number of functions and methods in the codebase.
-        This helps ensure overall codebase complexity remains manageable.
-        """
-        repo_root = Path(__file__).parent.parent
-        function_count = 0
-        parse_errors = []
-
-        for file_path in repo_root.glob("ouroboros/**/*.py"):
+    for file_path in repo_root.glob("ouroboros/**/*.py"):
             if "ouroboros/tools" in str(file_path):
                 continue  # Skip tools, as they might have many small functions
 
@@ -240,5 +241,5 @@ with patch.dict('sys.modules', {'ouroboros.supervisor.telegram_gateway': MagicMo
             except Exception as e:
                 parse_errors.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-        assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
-        assert function_count <= 400, f"Too many functions ({function_count}): consider refactoring or consolidating."
+    assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
+    assert function_count <= 400, f"Too many functions ({function_count}): consider refactoring or consolidating."
