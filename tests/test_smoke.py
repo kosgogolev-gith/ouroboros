@@ -4,6 +4,11 @@ import re
 import tempfile
 from pathlib import Path
 import ast
+import sys
+from unittest.mock import MagicMock # Import MagicMock
+
+# Add the parent directory to sys.path to resolve imports from ouroboros.supervisor
+sys.path.append(str(Path(__file__).parent.parent))
 
 from ouroboros.llm import LLMClient
 from ouroboros.tools.search import web_search_tool
@@ -12,6 +17,7 @@ from ouroboros.tools.core import repo_read_tool, repo_list_tool, drive_read_tool
 from ouroboros.tools.shell import claude_code_edit_tool
 from ouroboros.tools.shell import run_shell_tool
 from ouroboros.tools.knowledge import knowledge_read_tool, knowledge_write_tool
+from ouroboros.tools.registry import ToolRegistry, ToolContext # Import ToolRegistry and ToolContext
 
 # Assume default_api is available from the testing framework/environment
 # In a real test setup, you might mock this or pass a testable instance.
@@ -43,6 +49,23 @@ class MockDefaultAPI:
                         del os.environ["DRIVE_ROOT"]
 
 default_api = MockDefaultAPI()
+
+# Create a mock TelegramGateway instance
+mock_tg = MagicMock()
+mock_tg.owner_id = 12345  # Dummy owner_id for testing
+
+# Create a mock ToolContext instance with the mock TelegramGateway
+mock_tool_context = ToolContext(
+    repo_dir=Path("/tmp/repo"), 
+    drive_root=Path("/tmp/drive"), 
+    tg=mock_tg, # Pass the mock TelegramGateway
+)
+
+# Initialize ToolRegistry with the mock ToolContext
+try:
+    tool_registry = ToolRegistry(repo_dir=Path("/tmp/repo"), drive_root=Path("/tmp/drive"), tg=mock_tg)
+except Exception as e:
+    pytest.fail(f"Failed to initialize ToolRegistry with mock TelegramGateway: {e}")
 
 # Expected ToolRegistry entries, including the people knowledge-base and specification tools.
 EXPECTED_TOOLS = [
