@@ -207,7 +207,7 @@ def _document_analyze(ctx: ToolContext, document_text: str, task: str = "",
         data=payload,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
+    with urllib.request.urlopen(req, timeout=60) as resp:
         d = json.loads(resp.read())
 
     answer = d["choices"][0]["message"]["content"]
