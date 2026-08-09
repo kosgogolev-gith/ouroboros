@@ -19,6 +19,7 @@
 - ✅ `repo_write` — пуши работают
 - ✅ Бюджет — $68+ остаток ($100 лимит)
 - ✅ Disk — 25% занято (после очистки 45GB)
+- ✅ Голосовые сообщения из Telegram транскрибируются автоматически до моего получения.
 
 ## Инструменты (80 total, 2026-08-09)
 
@@ -28,8 +29,7 @@
 - `document_analyze document_text mode task` — sonar-reasoning-pro офлайн. Режимы: analyze/summarize/extract/compare/risks/tco
 
 ### Голос (НОВЫЕ)
-- `stt_transcribe audio_base64 filename` — Whisper large-v3 через OpenRouter
-- `stt_from_telegram file_id` — автотранскрипция голосовых из Telegram
+- `stt_transcribe audio_base64 filename` — Whisper large-v3 через OpenRouter (для внешних аудиофайлов)
 
 ### Погода (НОВЫЕ)
 - `weather_get city date` — текущая погода. date=today/tomorrow/YYYY-MM-DD
@@ -82,6 +82,7 @@
 
 **Профиль:** Управляющий директор, AI-инфраструктура, Москва, 38 лет.
 **Стиль:** Прямо, кратко, по-русски, без философии без запроса.
+**Сын:** Никита
 
 ### Утренний брифинг (8:30, команда «что сегодня?»)
 1. `weather_get city=Moscow date=today`
@@ -96,7 +97,7 @@
 - «статус задач» → task_list
 - «вечерний итог» → task_evening_review
 - фото → vlm_query автоматически
-- голосовое → stt_from_telegram + ответ на транскрипт
+- голосовое → автоматическая транскрипция, затем я отвечаю на текст.
 - «сравни КП» + текст → spec_compare
 - «найди [человека]» → people_search
 
@@ -106,3 +107,16 @@
 > **Это мужество делать то, что должно — когда никто тебе не поможет.**
 
 — Оуроборос, 2026-08-09
+
+
+## Оптимизация моделей 2026-08-09 19:42
+- OUROBOROS_MODEL_LIGHT → Qwen/Qwen3-Coder-Next (Cloud.ru)
+- OUROBOROS_CONSCIOUSNESS_MODEL → Qwen/Qwen3-30B-A3B (Cloud.ru)
+- OUROBOROS_MODEL_CODE → Qwen/Qwen3-Coder-Next (Cloud.ru)
+- OUROBOROS_MODEL_CODE_TIER2 → deepseek-ai/DeepSeek-V4-Flash (Cloud.ru, ~9x дешевле)
+- OUROBOROS_MODEL_CODE_TIER3 → anthropic/claude-haiku-4.5 (Cloud.ru, 3x дешевле sonnet)
+- OUROBOROS_MODEL_CODE_TIER4 → anthropic/claude-sonnet-4.6 (для самых сложных задач)
+- OUROBOROS_WEBSEARCH_MODEL → openai/gpt-5-nano (Cloud.ru)
+- OUROBOROS_DOC_MODEL → deepseek-ai/DeepSeek-V4-Flash
+- FALLBACK → Qwen/Qwen3-30B-A3B, nemotron-3-super:free, llama-3.3-70b
+Ожидаемая экономия: ~35-40% при сохранении качества.
