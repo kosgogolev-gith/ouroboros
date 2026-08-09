@@ -109,7 +109,9 @@ class LLMClient:
         self,
         api_key: Optional[str] = None,
         base_url: str = "https://openrouter.ai/api/v1",
+        model_override: Optional[str] = None,
     ):
+        self._model_override = model_override
         # Cloud.ru backend support
         cloudru_base = os.environ.get("CLOUDRU_BASE_URL", "")
         cloudru_key = os.environ.get("CLOUDRU_API_KEY", "")

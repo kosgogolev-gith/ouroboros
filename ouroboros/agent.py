@@ -411,11 +411,32 @@ class OuroborosAgent:
             else:
                 initial_effort = "medium"
 
+            # Auto-select code model for coding tasks
+            import os as _os
+            _task_text = str(task.get("text") or "").lower()
+            _code_keywords = ("напиши код", "исправь код", "добавь функцию", "создай модуль",
+                              "починить", "debugg", "баг", "ошибка в коде", "напиши скрипт",
+                              "write code", "fix bug", "create function", "patch", "refactor")
+            _is_code_task = (
+                task_type_str in ("evolution", "code", "review") or
+                any(k in _task_text for k in _code_keywords)
+            )
+            _active_llm = self.llm
+            if _is_code_task:
+                from ouroboros.llm import LLMClient as _LLMClient
+                _code_model = (
+                    _os.environ.get("OUROBOROS_MODEL_CODE_TIER3") or  # claude-haiku-4.5
+                    _os.environ.get("OUROBOROS_MODEL_CODE") or
+                    None
+                )
+                if _code_model:
+                    _active_llm = _LLMClient(model_override=_code_model)
+
             try:
                 text, usage, llm_trace = run_llm_loop(
                     messages=messages,
                     tools=self.tools,
-                    llm=self.llm,
+                    llm=_active_llm,
                     drive_logs=drive_logs,
                     emit_progress=self._emit_progress,
                     incoming_messages=self._incoming_messages,
