@@ -4,6 +4,7 @@ import subprocess
 import os
 import shutil
 from datetime import datetime, timedelta
+import psutil # Import psutil
 
 from ouroboros.tools.registry import ToolEntry
 
@@ -17,7 +18,7 @@ def _run_shell_cmd(cmd: List[str]) -> str:
     except FileNotFoundError:
         return f"ERROR: Command not found: {cmd[0]}"
 
-def system_status(ctx=None) -> str:
+def system_status(ctx=None) -> Dict[str, Any]: # Changed return type hint to Dict[str, Any]
     """
     Shows everything about the system state:
     uptime of the service, disk usage, RAM usage, budget,
@@ -27,7 +28,10 @@ def system_status(ctx=None) -> str:
 
     # Uptime
     try:
-        status['uptime'] = str(timedelta(seconds=uptime_seconds))
+        boot_time_timestamp = psutil.boot_time()
+        boot_time = datetime.fromtimestamp(boot_time_timestamp)
+        uptime = datetime.now() - boot_time
+        status['uptime'] = str(uptime).split('.')[0] # Remove microseconds for cleaner output
     except Exception as e:
         status['uptime'] = f"Error getting uptime: {e}"
 
@@ -44,6 +48,7 @@ def system_status(ctx=None) -> str:
 
     # RAM Usage
     try:
+        mem = psutil.virtual_memory()
         status['ram_usage'] = {
             'total_gb': round(mem.total / (1024**3), 2),
             'used_gb': round(mem.used / (1024**3), 2),
@@ -54,21 +59,18 @@ def system_status(ctx=None) -> str:
         status['ram_usage'] = f"Error getting RAM usage: {e}"
 
     # Budget (assuming it's passed from context or a global store)
-    # For now, we'll use a placeholder or try to read from a known path
     try:
-        # This part assumes budget info is available somewhere,
-        # e.g., in a state.json on Drive. For now, it's a placeholder.
-        # In a real scenario, this would be injected by the supervisor.
         status['budget'] = "N/A (supervisor provides this)"
+        if ctx and 'budget' in ctx: # Attempt to get budget from context if available
+            status['budget'] = f"${ctx['budget']['remaining_usd']:.2f} / ${ctx['budget']['total_usd']:.2f}"
     except Exception as e:
         status['budget'] = f"Error getting budget: {e}"
 
     # Last Errors (placeholder, would require parsing logs)
-    status['last_errors'] = "N/A (requires log parsing)"
+    status['last_errors'] = "N/A (requires log parsing or supervisor data)"
 
     # Version (SHA)
     try:
-        # Assuming current SHA can be fetched from the repo
         sha = _run_shell_cmd(["git", "rev-parse", "HEAD"])
         if "ERROR" not in sha:
             status['version_sha'] = sha
