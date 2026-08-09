@@ -16,7 +16,7 @@ from typing import Optional, Tuple
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload, MediaIoBaseUpload
 
 from .auth import authenticate
 
@@ -306,11 +306,9 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
     except FileNotFoundError:
         pass  # Will create new file
 
-    media = MediaFileUpload(
-        None,  # We'll provide content directly
-        mimetype=mime_type,
-        resumable=True,
-    )
+    import io as _io
+    _content_bytes = content.encode("utf-8") if isinstance(content, str) else content
+    media = MediaIoBaseUpload(_io.BytesIO(_content_bytes), mimetype=mime_type, resumable=False)
 
     if existing_file_id and mode == "overwrite":
         # Update existing file
