@@ -1,56 +1,37 @@
-import requests
-from bs4 import BeautifulSoup
 
-# Этот импорт будет заменен на прямой вызов языковой модели
-# from ouroboros.llm import LLMClient 
+from typing import Literal
+from ouroboros.tools.registry import register_tool
+from ouroboros.tools.llm import get_llm
+from ouroboros.tools.browser import browse_page
 
-def get_tools():
-    return [summary_webpage]
-
+@register_tool
 def summary_webpage(url: str) -> str:
     """Делает саммаризацию страницы по ссылке: краткое содержание и вывод.
 
     Args:
         url: URL страницы для саммаризации.
-
-    Returns:
-        Текст с саммаризацией страницы: краткое содержание и вывод.
     """
     try:
-        # Использование requests для получения содержимого страницы
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()  # Вызовет исключение для ошибок HTTP
-        
-        # Парсинг HTML для извлечения читаемого текста
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Удаление скриптов, стилей и других невидимых элементов
-        for script in soup(["script", "style"]):
-            script.extract()    # rip it out
+        page_content = browse_page(url=url, output="text")
+        if not page_content or not page_content.get("text"):
+            return "Не удалось получить содержимое страницы."
 
-        text = soup.get_text()
-
-        # Разбиение текста на строки и удаление лишних пробелов
-        lines = (line.strip() for line in text.splitlines())
-        # Удаление пустых строк
-        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-        # Объединение в один текст
-        text = '\n'.join(chunk for chunk in chunks if chunk)
+        text_to_summarize = page_content["text"]
         
-        if not text:
-            return "Не удалось извлечь текст со страницы."
+        # Использование языковой модели для саммаризации
+        llm = get_llm()
+        prompt = f"""Сделай краткое содержание и основные выводы по следующему тексту:
 
-        # Здесь будет вызов LLM для саммаризации
-        # Пока заглушка:
-        summary = f"Краткое содержание страницы по URL: {url}\n\n" \
-                  f"Извлеченный текст (первые 500 символов): {text[:500]}..."
+{text_to_summarize[:8000]} # Ограничиваем размер текста для LLM, чтобы избежать переполнения контекста
 
-        # В будущем:
-        # llm_client = LLMClient()
-        # summary = llm_client.generate_summary(text) # Пример вызова
+Краткое содержание и выводы:
+"""
+        summary_response = llm.complete(prompt)
         
-        return summary
-    except requests.exceptions.RequestException as e:
-        return f"Ошибка при доступе к странице: {e}"
+        return summary_response.text
+
     except Exception as e:
-        return f"Произошла непредвиденная ошибка: {e}"
+        return f"Произошла ошибка при саммаризации страницы: {e}"
+
+def get_tools():
+    return [summary_webpage]
