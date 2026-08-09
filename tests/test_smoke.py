@@ -27,7 +27,7 @@ class MockTelegramGateway:
 
 # Use patch.dict to mock the module that ToolRegistry tries to import
 with patch.dict('sys.modules', {'ouroboros.supervisor.telegram_gateway': MagicMock(TelegramGateway=MockTelegramGateway)}):
-    # Now import modules that depend on TelegramGateway
+    # Now import modules that depend on TelegramGateway *inside* the patched context
     from ouroboros.llm import LLMClient
     from ouroboros.tools.search import web_search_tool
     from ouroboros.tools.git import git_status_tool, git_diff_tool
@@ -115,6 +115,7 @@ with patch.dict('sys.modules', {'ouroboros.supervisor.telegram_gateway': MagicMo
         "people_update", "people_delete",
         # Specification tools
         "xlsx_read", "spec_compare", "requirements_save", "requirements_load",
+        "send_file_to_owner", # Add the new tool to expected tools
     ]
 
     # Constants for test_no_extremely_oversized_functions
@@ -241,5 +242,5 @@ def test_function_count_reasonable():
             except Exception as e:
                 parse_errors.append(f"Error processing {file_path.relative_to(repo_root)}: {e}")
 
-    assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
+        assert not parse_errors, f"Errors encountered during parsing:\n" + "\n".join(parse_errors)
     assert function_count <= 400, f"Too many functions ({function_count}): consider refactoring or consolidating."
