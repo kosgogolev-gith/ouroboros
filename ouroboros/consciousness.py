@@ -32,6 +32,7 @@ from ouroboros.utils import (
     truncate_for_log, sanitize_tool_result_for_log, sanitize_tool_args_for_log,
 )
 from ouroboros.llm import LLMClient, DEFAULT_LIGHT_MODEL
+from ouroboros.circuit_breaker import CircuitBreaker, ConsciousnessState
 
 log = logging.getLogger(__name__)
 
@@ -70,6 +71,20 @@ class BackgroundConsciousness:
             os.environ.get("OUROBOROS_BG_BUDGET_PCT", "10")
         )
 
+        # Lifecycle state + circuit breaker (anti-hang / anti-spam protection)
+        self._state: ConsciousnessState = ConsciousnessState.STOPPED
+        self._breaker = CircuitBreaker(
+            failure_threshold=int(os.environ.get("OUROBOROS_BG_FAILURE_THRESHOLD", "3")),
+            base_cooldown_sec=float(os.environ.get("OUROBOROS_BG_COOLDOWN_SEC", "1800")),
+            max_cooldown_sec=float(os.environ.get("OUROBOROS_BG_MAX_COOLDOWN_SEC", "14400")),
+        )
+        # Hard timeout on the LLM call itself — the actual hang vector: LLMClient.chat()
+        # has no built-in timeout, so a stalled network call previously blocked this
+        # daemon thread forever (unlike tool calls, which already had a 30s timeout).
+        self._llm_call_timeout_sec: float = float(
+            os.environ.get("OUROBOROS_BG_LLM_TIMEOUT_SEC", "60")
+        )
+
     # -------------------------------------------------------------------
     # Lifecycle
     # -------------------------------------------------------------------
@@ -87,6 +102,7 @@ class BackgroundConsciousness:
             return "Background consciousness is already running."
         self._running = True
         self._paused = False
+        self._state = ConsciousnessState.IDLE
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
@@ -96,9 +112,20 @@ class BackgroundConsciousness:
         if not self.is_running:
             return "Background consciousness is not running."
         self._running = False
+        self._state = ConsciousnessState.STOPPED
         self._stop_event.set()
         self._wakeup_event.set()  # Unblock sleep
         return "Background consciousness stopping."
+
+    def status(self) -> Dict[str, Any]:
+        """Observability snapshot — used by /bg status and by tests."""
+        return {
+            "running": self.is_running,
+            "state": self._state.value,
+            "next_wakeup_sec": self._next_wakeup_sec,
+            "bg_spent_usd": round(self._bg_spent_usd, 4),
+            "breaker": self._breaker.snapshot(),
+        }
 
     def pause(self) -> None:
         """Pause during task execution to avoid budget contention."""
@@ -126,6 +153,7 @@ class BackgroundConsciousness:
 
     def _loop(self) -> None:
         """Daemon thread: sleep → wake → think → sleep."""
+        self._state = ConsciousnessState.IDLE
         while not self._stop_event.is_set():
             # Wait for next wakeup
             self._wakeup_event.clear()
@@ -134,27 +162,88 @@ class BackgroundConsciousness:
             if self._stop_event.is_set():
                 break
 
-            # Skip if paused (task running)
-            if self._paused:
-                continue
+            self._run_cycle_if_due()
 
-            # Budget check
-            if not self._check_budget():
-                self._next_wakeup_sec = 3600  # Sleep long if over budget
-                continue
+    def _run_cycle_if_due(self) -> None:
+        """
+        Single wake→check→think→record cycle. Extracted from `_loop` so the
+        state machine / circuit breaker wiring can be unit-tested without
+        spinning a real thread or waiting on real timers.
+        """
+        # Skip if paused (task running)
+        if self._paused:
+            self._state = ConsciousnessState.PAUSED
+            return
 
-            try:
-                self._think()
-            except Exception as e:
-                append_jsonl(self._drive_root / "logs" / "events.jsonl", {
-                    "ts": utc_now_iso(),
-                    "type": "consciousness_error",
-                    "error": repr(e),
-                    "traceback": traceback.format_exc()[:1500],
-                })
-                self._next_wakeup_sec = min(
-                    self._next_wakeup_sec * 2, 1800
-                )
+        # Budget check
+        if not self._check_budget():
+            self._next_wakeup_sec = 3600  # Sleep long if over budget
+            self._state = ConsciousnessState.IDLE
+            return
+
+        # Circuit breaker: skip the cycle entirely while OPEN and not yet
+        # eligible for a half-open probe.
+        if not self._breaker.allow_request():
+            self._state = ConsciousnessState.COOLDOWN
+            self._next_wakeup_sec = max(60.0, self._breaker.time_until_retry())
+            return
+
+        self._state = ConsciousnessState.THINKING
+        try:
+            ok = self._think()
+        except Exception as e:
+            # Defensive: _think() already catches its own exceptions and
+            # returns False, but never let an unexpected one kill the
+            # daemon thread outright.
+            append_jsonl(self._drive_root / "logs" / "events.jsonl", {
+                "ts": utc_now_iso(),
+                "type": "consciousness_error",
+                "error": repr(e),
+                "traceback": traceback.format_exc()[:1500],
+            })
+            ok = False
+
+        if ok:
+            self._breaker.record_success()
+        else:
+            just_tripped = self._breaker.record_failure()
+            if just_tripped:
+                self._notify_owner_circuit_open()
+
+        # Only the breaker's cooldown overrides the wakeup timer (e.g. from
+        # set_next_wakeup during a successful cycle) — never stomp on it.
+        retry_in = self._breaker.time_until_retry()
+        if retry_in > 0:
+            self._next_wakeup_sec = retry_in
+        self._state = ConsciousnessState.IDLE
+
+    def _notify_owner_circuit_open(self) -> None:
+        """
+        Best-effort proactive alert when the circuit trips OPEN. Bypasses the
+        LLM entirely (it's the component that's failing) and invokes the
+        send_owner_message tool function directly — same delivery path the
+        LLM would normally use, just without needing the LLM to work.
+        """
+        cooldown_min = int(self._breaker.cooldown_sec // 60)
+        text = (
+            f"⚠️ Фоновое сознание отключилось после "
+            f"{self._breaker.failure_threshold} сбоев подряд "
+            f"(LLM call: timeout {self._llm_call_timeout_sec:.0f}s или ошибка). "
+            f"Возобновит попытки через ~{cooldown_min} мин. "
+            f"Подробности: logs/events.jsonl (consciousness_llm_error / consciousness_llm_timeout)."
+        )
+        try:
+            chat_id = self._owner_chat_id_fn()
+            self._registry._ctx.current_chat_id = chat_id
+            self._registry._ctx.pending_events = []
+            self._registry.execute("send_owner_message", {
+                "text": text, "reason": "circuit_breaker_open",
+            })
+            if self._event_queue is not None:
+                for evt in self._registry._ctx.pending_events:
+                    self._event_queue.put(evt)
+        except Exception:
+            log.warning("Failed to notify owner about circuit breaker open", exc_info=True)
 
     def _check_budget(self) -> bool:
         """Check if background consciousness is within its budget allocation."""
@@ -172,8 +261,12 @@ class BackgroundConsciousness:
     # Think cycle
     # -------------------------------------------------------------------
 
-    def _think(self) -> None:
-        """One thinking cycle: build context, call LLM, execute tools iteratively."""
+    def _think(self) -> bool:
+        """One thinking cycle: build context, call LLM, execute tools iteratively.
+
+        Returns True on success, False on failure (LLM error/timeout or any
+        other exception) — drives the circuit breaker in `_run_cycle_if_due`.
+        """
         context = self._build_context()
         model = self._model
 
@@ -192,13 +285,7 @@ class BackgroundConsciousness:
             for round_idx in range(1, self._MAX_BG_ROUNDS + 1):
                 if self._paused:
                     break
-                msg, usage = self._llm.chat(
-                    messages=messages,
-                    model=model,
-                    tools=tools,
-                    reasoning_effort="low",
-                    max_tokens=2048,
-                )
+                msg, usage = self._call_llm_with_timeout(messages, model, tools)
                 cost = float(usage.get("cost") or 0)
                 total_cost += cost
                 self._bg_spent_usd += cost
@@ -278,17 +365,67 @@ class BackgroundConsciousness:
                 "rounds": round_idx,
                 "model": model,
             })
+            return True
 
         except Exception as e:
             append_jsonl(self._drive_root / "logs" / "events.jsonl", {
                 "ts": utc_now_iso(),
-                "type": "consciousness_llm_error",
+                "type": "consciousness_llm_timeout" if isinstance(e, TimeoutError) else "consciousness_llm_error",
                 "error": repr(e),
             })
+            return False
 
     # -------------------------------------------------------------------
     # Context building (lightweight)
     # -------------------------------------------------------------------
+
+    def _call_llm_with_timeout(
+        self, messages: List[Dict[str, Any]], model: str, tools: List[Dict[str, Any]]
+    ) -> Any:
+        """
+        Call the LLM with a hard wall-clock timeout.
+
+        LLMClient.chat() has no built-in timeout, so a stalled network call
+        previously blocked this daemon thread forever — the actual root
+        cause of past "зависания" (hangs). Tool calls already had this
+        protection via `_execute_tool`'s ThreadPoolExecutor timeout; this
+        mirrors that same pattern for the LLM call itself.
+
+        Raises TimeoutError if the call exceeds `self._llm_call_timeout_sec`,
+        or re-raises the original exception on any other failure.
+        """
+        box: Dict[str, Any] = {}
+
+        def _run():
+            try:
+                box["value"] = self._llm.chat(
+                    messages=messages, model=model, tools=tools,
+                    reasoning_effort="low", max_tokens=2048,
+                )
+            except Exception as e:
+                box["error"] = e
+
+        # NOTE: deliberately not a `with` block. `ThreadPoolExecutor.__exit__`
+        # calls shutdown(wait=True), which would block on the very worker
+        # thread we're trying to time out — recreating the hang we're fixing.
+        # Explicit shutdown(wait=False) below lets the stuck worker leak as a
+        # daemon-adjacent thread while control returns to the caller, same
+        # pattern already used in loop.py's `_execute_with_timeout`.
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(_run)
+            try:
+                future.result(timeout=self._llm_call_timeout_sec)
+            except concurrent.futures.TimeoutError:
+                raise TimeoutError(
+                    f"Background LLM call exceeded {self._llm_call_timeout_sec:.0f}s"
+                )
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+        if "error" in box:
+            raise box["error"]
+        return box["value"]
 
     def _load_bg_prompt(self) -> str:
         """Load consciousness system prompt from file."""
