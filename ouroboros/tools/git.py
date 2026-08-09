@@ -154,6 +154,13 @@ def _repo_write_commit(ctx: ToolContext, path: str, content: str, commit_message
         except Exception as e:
             return f"⚠️ FILE_WRITE_ERROR: {e}"
 
+        # ── content guard ─────────────────────────────────────────────────
+        if str(path).endswith(".py") and len(content.strip()) < 20:
+            return (
+                f"❌ EMPTY FILE BLOCKED: {path}\n"
+                f"File content is too short ({len(content.strip())} chars). "
+                f"Make sure you wrote the full file content, not a placeholder."
+            )
         # ── py_compile guard ──────────────────────────────────────────────
         if str(path).endswith(".py"):
             import subprocess as _sp, sys as _sys
