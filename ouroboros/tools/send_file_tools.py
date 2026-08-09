@@ -119,6 +119,29 @@ def _send_file(ctx, file_path: str = "", content_text: str = "",
         return f"❌ Ошибка: {e}"
 
 
+
+def _drive_to_telegram(ctx, drive_path: str, caption: str = "") -> str:
+    """Read a file from Google Drive and send it to owner via Telegram in one step.
+
+    This is the correct way to send Drive files — combines drive_read + send_file.
+    drive_path: relative to Ouroboros Drive root (e.g. 'memory/report.md', 'my_skills.md')
+    """
+    try:
+        # Step 1: read from Drive
+        from ouroboros.tools.core import _drive_read
+        text = _drive_read(ctx, path=drive_path)
+        if not text or text.startswith("❌") or "not found" in text.lower():
+            return f"❌ Файл не найден на Drive: {drive_path}"
+
+        # Step 2: send via Telegram
+        filename = drive_path.split("/")[-1]
+        result = _send_file(ctx, content_text=text, filename=filename,
+                           caption=caption or f"📎 {filename} (с Google Drive)")
+        return result
+    except Exception as e:
+        return f"❌ drive_to_telegram ошибка: {e}"
+
+
 def get_tools() -> List:
     if ToolEntry is None:
         return []
@@ -129,10 +152,11 @@ def get_tools() -> List:
                 "name": "send_file",
                 "description": (
                     "Send a file to the owner via Telegram. "
-                    "Use to share reports, logs, generated PDFs, CSV exports, code files. "
-                    "Provide file_path (local path), content_text (text to send as file), "
-                    "or file_base64 (base64 bytes). "
-                    "Supports: pdf, txt, md, json, csv, xlsx, docx, png, jpg, zip, py, log."
+                    "Send a file to the owner via Telegram. "
+                    "IMPORTANT: file_path must be a LOCAL filesystem path (e.g. /tmp/report.md). "
+                    "Google Drive files are NOT local paths — use drive_read first, then content_text. "
+                    "To send a Drive file: 1) drive_read path=X -> get text, 2) send_file content_text=<text> filename=X. "
+                    "Supports: pdf, txt, md, json, csv, xlsx, docx, png, jpg, zip, py, log. Max 50MB."
                 ),
                 "parameters": {
                     "type": "object",
@@ -147,5 +171,26 @@ def get_tools() -> List:
                 },
             },
             _send_file,
+        ),
+        ToolEntry(
+            "drive_to_telegram",
+            {
+                "name": "drive_to_telegram",
+                "description": (
+                    "Read a file from Google Drive and send it to owner via Telegram in ONE step. "
+                    "Use this instead of combining drive_read + send_file manually. "
+                    "drive_path: relative path on Drive (e.g. 'memory/report.md', 'my_skills.md'). "
+                    "This is the CORRECT way to send Drive files to owner."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "drive_path": {"type": "string", "description": "Relative path on Google Drive"},
+                        "caption": {"type": "string", "default": ""},
+                    },
+                    "required": ["drive_path"],
+                },
+            },
+            _drive_to_telegram,
         ),
     ]
