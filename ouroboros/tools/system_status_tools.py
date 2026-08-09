@@ -1,7 +1,4 @@
 
-"""
-Инструмент для получения информации о состоянии системы Ouroboros.
-"""
 import datetime
 import json
 import os
@@ -63,7 +60,8 @@ def _system_status_handler(ctx) -> str:
     status_report = []
 
     # Uptime
-    launcher_start = ctx.runtime_context.get('supervisor', {}).get('launcher_start', '')
+    # Изменено: доступ к supervisor из корневого ctx
+    launcher_start = ctx.get('supervisor', {}).get('launcher_start', '')
     if launcher_start:
         status_report.append(f"Uptime сервиса: {_get_uptime_string(launcher_start)}")
     else:
@@ -84,21 +82,17 @@ def _system_status_handler(ctx) -> str:
         status_report.append(f"RAM: {ram_info['error']}")
 
     # Budget
-    budget_info = ctx.runtime_context.get('budget', {})
+    # Изменено: доступ к budget из корневого ctx
+    budget_info = ctx.get('budget', {})
     if budget_info:
-        status_report.append(f"Бюджет: Потрачено ${budget_info.get('spent_usd', 'N/A'):.2f} из ${budget_info.get('total_usd', 'N/A'):.2f} (Осталось ${budget_info.get('remaining_usd', 'N/A'):.2f})")
+        status_report.append(f"Бюджет: Потрачено ${budget_info.get('spent_usd', 'N/A'):.2f} из ${budget_info.get('total_usd', 'N/A')}.00 (Осталось ${budget_info.get('remaining_usd', 'N/A'):.2f})")
     else:
         status_report.append("Бюджет: Информация недоступна")
 
     # Version (SHA)
-    git_head = ctx.runtime_context.get('git_head', 'N/A')
+    # Изменено: доступ к git_head из корневого ctx
+    git_head = ctx.get('git_head', 'N/A')
     status_report.append(f"Версия (SHA): {git_head}")
-
-    # Latest errors - for now, we will rely on chat_history or scratchpad for this,
-    # as direct access to logs/events.jsonl from tools is not straightforward without more advanced logging tools.
-    # A more sophisticated approach would involve reading logs/events.jsonl or similar.
-    # For now, let's just mention if there were recent issues in the scratchpad.
-    # This requires manual parsing of scratchpad in the agent loop itself, not within the tool.
 
     return "\n".join(status_report)
 
@@ -119,3 +113,4 @@ def get_tools() -> List[ToolEntry]:
             _system_status_handler,
         )
     ]
+
