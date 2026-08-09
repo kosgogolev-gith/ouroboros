@@ -68,21 +68,49 @@ def _brave_search(query: str, max_results: int = 5) -> list:
             for r in d.get("web", {}).get("results", [])[:max_results]]
 
 
+def _perplexity_search(query: str) -> str:
+    """Search via Perplexity sonar API — returns answer + sources."""
+    import urllib.request, os
+    key = os.environ.get("PERPLEXITY_API_KEY", "")
+    if not key:
+        return ""
+    payload = json.dumps({
+        "model": "sonar",
+        "messages": [{"role": "user", "content": query}],
+        "max_tokens": 512,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.perplexity.ai/chat/completions",
+        data=payload,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        d = json.loads(resp.read())
+    answer = d["choices"][0]["message"]["content"]
+    sources = d.get("citations", [])
+    lines = [f"**{query}**\n", answer]
+    if sources:
+        lines.append("\n**Источники:**")
+        for i, s in enumerate(sources[:5], 1):
+            lines.append(f"{i}. {s}")
+    return "\n".join(lines)
+
+
 def _web_search_with_real_provider(ctx: ToolContext, query: str) -> str:
-    """Performs a web search. Uses Brave Search API if key set, otherwise DuckDuckGo."""
-    results = []
-    error = None
-    # 1. Try Brave (best quality)
+    """Search the web. Uses Perplexity sonar (best) with DuckDuckGo fallback."""
+    # 1. Perplexity sonar — best quality, supports Russian
     try:
-        results = _brave_search(query)
+        result = _perplexity_search(query)
+        if result:
+            return result
     except Exception:
         pass
-    # 2. Fallback to DuckDuckGo
-    if not results:
-        try:
-            results = _ddg_search(query)
-        except Exception as e:
-            error = str(e)
+    # 2. Fallback: DuckDuckGo
+    results = []
+    try:
+        results = _ddg_search(query)
+    except Exception:
+        pass
     if results:
         lines = [f"**Результаты поиска: {query}**\n"]
         for i, r in enumerate(results, 1):
@@ -92,7 +120,7 @@ def _web_search_with_real_provider(ctx: ToolContext, query: str) -> str:
             if r.get("url"):
                 lines.append(f"   🔗 {r['url']}")
         return "\n".join(lines)
-    return json.dumps({"error": error or "No results found", "query": query, "sources": []}, ensure_ascii=False)
+    return json.dumps({"error": "No results found", "query": query, "sources": []}, ensure_ascii=False)
 
 
 def get_tools() -> List[ToolEntry]:
