@@ -82,8 +82,16 @@ def system_status() -> Dict[str, Any]:
 def get_tools() -> List[ToolEntry]:
     return [
         ToolEntry(
-            name="system_status",
-            description="Shows everything about the system state: uptime of the service, disk usage, RAM usage, budget, last errors, and current version (SHA).",
-            parameters=[] # No parameters for this tool
+            "system_status",
+            {
+                "name": "system_status",
+                "description": "Show system health: service uptime, disk, RAM, budget, last errors, git SHA. No parameters needed.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
+            system_status,
         )
     ]
