@@ -161,6 +161,63 @@ def _perplexity_deep_search(ctx: ToolContext, query: str, focus: str = "") -> st
             lines.append(f"{i}. {s}")
     return "\n".join(lines)
 
+
+def _document_analyze(ctx: ToolContext, document_text: str, task: str = "",
+                       mode: str = "analyze") -> str:
+    """Offline document analysis via Perplexity sonar-reasoning-pro (no web search).
+    Supports: analyze, summarize, extract, compare, risks, tco.
+    """
+    import urllib.request, os
+    key = os.environ.get("PERPLEXITY_API_KEY", "")
+    if not key:
+        return "❌ PERPLEXITY_API_KEY not set."
+
+    mode_prompts = {
+        "analyze":   "Проанализируй документ детально. Выдели ключевые факты, цифры, условия.",
+        "summarize": "Сделай краткое резюме документа (5-10 пунктов).",
+        "extract":   "Извлеки все числовые значения, даты, технические характеристики.",
+        "compare":   "Сравни характеристики и выдели ключевые различия.",
+        "risks":     "Найди риски, несоответствия, подводные камни, неясные формулировки.",
+        "tco":       "Рассчитай или оцени совокупную стоимость владения (TCO): CAPEX, OPEX, ROI.",
+    }
+    system_prompt = mode_prompts.get(mode, mode_prompts["analyze"])
+    if task:
+        system_prompt += f" Фокус: {task}."
+
+    # Truncate document if too long (128k context limit)
+    max_doc_chars = 80000
+    if len(document_text) > max_doc_chars:
+        document_text = document_text[:max_doc_chars] + "\n\n[...документ обрезан до 80000 символов]"
+
+    payload = json.dumps({
+        "model": "sonar-reasoning-pro",
+        "messages": [
+            {"role": "system", "content": (
+                "You are an expert document analyst specializing in technical and commercial documents. "
+                "Provide structured, detailed analysis. Respond in Russian unless document is in another language. "
+                "No web search needed — analyze only the provided text."
+            )},
+            {"role": "user", "content": f"{system_prompt}\n\n---\n{document_text}\n---"},
+        ],
+        "max_tokens": 2048,
+    }).encode()
+
+    req = urllib.request.Request(
+        "https://api.perplexity.ai/chat/completions",
+        data=payload,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        d = json.loads(resp.read())
+
+    answer = d["choices"][0]["message"]["content"]
+    # Strip <think> reasoning tokens if present
+    import re
+    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL).strip()
+    mode_label = {"analyze": "Анализ", "summarize": "Резюме", "extract": "Извлечение данных",
+                  "compare": "Сравнение", "risks": "Риски", "tco": "TCO анализ"}.get(mode, "Анализ")
+    return f"📄 **{mode_label} документа**\n\n{answer}"
+
 def get_tools() -> List[ToolEntry]:
     return [
         ToolEntry("web_search", {
@@ -183,6 +240,24 @@ def get_tools() -> List[ToolEntry]:
                 "focus": {"type": "string", "description": "Optional context (e.g. 'GPU infrastructure', 'pricing 2026')", "default": ""},
             }, "required": ["query"]},
         }, _perplexity_deep_search),
+        ToolEntry("document_analyze", {
+            "name": "document_analyze",
+            "description": (
+                "Offline document analysis via Perplexity sonar-reasoning-pro (no web search). "
+                "Use for: analyzing КП/specs/contracts, extracting numbers, finding risks, TCO calculation. "
+                "Paste document text directly. Supports modes: analyze, summarize, extract, compare, risks, tco."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "document_text": {"type": "string", "description": "Full text of the document to analyze"},
+                "task": {"type": "string", "description": "Specific task or focus (e.g. 'найди несоответствия в ценах')", "default": ""},
+                "mode": {
+                    "type": "string",
+                    "description": "Analysis mode",
+                    "enum": ["analyze", "summarize", "extract", "compare", "risks", "tco"],
+                    "default": "analyze"
+                },
+            }, "required": ["document_text"]},
+        }, _document_analyze),
     ]
 
 # Alias for backward compatibility
