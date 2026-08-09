@@ -3,7 +3,6 @@ from typing import List, Dict, Any
 import subprocess
 import os
 import shutil
-import psutil
 from datetime import datetime, timedelta
 
 from ouroboros.tools.registry import ToolEntry
@@ -28,7 +27,6 @@ def system_status() -> Dict[str, Any]:
 
     # Uptime
     try:
-        uptime_seconds = time.time() - psutil.boot_time()
         status['uptime'] = str(timedelta(seconds=uptime_seconds))
     except Exception as e:
         status['uptime'] = f"Error getting uptime: {e}"
@@ -40,14 +38,12 @@ def system_status() -> Dict[str, Any]:
             'total_gb': round(total / (1024**3), 2),
             'used_gb': round(used / (1024**3), 2),
             'free_gb': round(free / (1024**3), 2),
-            'percent_used': psutil.disk_usage('/').percent
         }
     except Exception as e:
         status['disk_usage'] = f"Error getting disk usage: {e}"
 
     # RAM Usage
     try:
-        mem = psutil.virtual_memory()
         status['ram_usage'] = {
             'total_gb': round(mem.total / (1024**3), 2),
             'used_gb': round(mem.used / (1024**3), 2),
