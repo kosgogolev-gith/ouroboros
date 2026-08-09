@@ -123,6 +123,44 @@ def _web_search_with_real_provider(ctx: ToolContext, query: str) -> str:
     return json.dumps({"error": "No results found", "query": query, "sources": []}, ensure_ascii=False)
 
 
+
+def _perplexity_deep_search(ctx: ToolContext, query: str, focus: str = "") -> str:
+    """Deep search via Perplexity sonar-pro — detailed answer with sources.
+    focus: optional context hint (e.g. 'GPU infrastructure', 'pricing', 'technical specs')
+    """
+    import urllib.request, os
+    key = os.environ.get("PERPLEXITY_API_KEY", "")
+    if not key:
+        return "❌ PERPLEXITY_API_KEY not set."
+    full_query = f"{query}. {focus}" if focus else query
+    payload = json.dumps({
+        "model": "sonar-pro",
+        "messages": [
+            {"role": "system", "content": (
+                "You are an expert research assistant. "
+                "Provide detailed, structured answers with specific facts, numbers, and dates. "
+                "Always cite sources. Respond in the same language as the query."
+            )},
+            {"role": "user", "content": full_query},
+        ],
+        "max_tokens": 1024,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.perplexity.ai/chat/completions",
+        data=payload,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        d = json.loads(resp.read())
+    answer = d["choices"][0]["message"]["content"]
+    sources = d.get("citations", [])
+    lines = [f"🔍 **Deep Search: {query}**\n", answer]
+    if sources:
+        lines.append("\n**Источники:**")
+        for i, s in enumerate(sources[:8], 1):
+            lines.append(f"{i}. {s}")
+    return "\n".join(lines)
+
 def get_tools() -> List[ToolEntry]:
     return [
         ToolEntry("web_search", {
@@ -132,6 +170,19 @@ def get_tools() -> List[ToolEntry]:
                 "query": {"type": "string"},
             }, "required": ["query"]},
         }, _web_search_with_real_provider),
+        ToolEntry("perplexity_deep_search", {
+            "name": "perplexity_deep_search",
+            "description": (
+                "Deep web search via Perplexity sonar-pro. "
+                "Use for complex research: GPU specs, vendor comparison, pricing, technical analysis, "
+                "news analysis, competitive intelligence. Returns detailed structured answer + sources. "
+                "Slower than web_search but significantly more thorough."
+            ),
+            "parameters": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "Research question or topic"},
+                "focus": {"type": "string", "description": "Optional context (e.g. 'GPU infrastructure', 'pricing 2026')", "default": ""},
+            }, "required": ["query"]},
+        }, _perplexity_deep_search),
     ]
 
 # Alias for backward compatibility
