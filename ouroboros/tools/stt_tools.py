@@ -85,7 +85,7 @@ def get_tools() -> List:
             {
                 "name": "stt_transcribe",
                 "description": (
-                    "Transcribe audio to text using Whisper. "
+                    "Transcribe audio to text using Whisper. NOTE: Voice messages from Telegram are transcribed automatically — you receive them as plain text already. Use this tool only for external audio files. "
                     "Provide audio as base64-encoded string. "
                     "Supports ogg (Telegram voice), mp3, wav. "
                     "Returns transcribed text in the original language."
@@ -101,23 +101,7 @@ def get_tools() -> List:
             },
             _stt_from_base64,
         ),
-        ToolEntry(
-            "stt_from_telegram",
-            {
-                "name": "stt_from_telegram",
-                "description": (
-                    "Transcribe a Telegram voice message by file_id. "
-                    "Use when a voice message arrives in chat — pass its file_id directly. "
-                    "Returns transcribed text."
-                ),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "file_id": {"type": "string", "description": "Telegram file_id of the voice message"},
-                    },
-                    "required": ["file_id"],
-                },
-            },
-            _stt_from_telegram_file,
-        ),
+        # stt_from_telegram removed — voice messages are auto-transcribed
+        # by colab_launcher.py BEFORE reaching the agent. The agent always
+        # receives "[Голосовое сообщение]: <transcript>" as plain text.
     ]
