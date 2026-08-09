@@ -531,28 +531,23 @@ while True:
                 if b64:
                     image_data = (b64, mime, caption)
         elif msg.get("voice") or msg.get("audio"):
-            # Voice message → transcribe via Whisper STT
+            # Voice message → download + transcribe via Whisper STT directly
             voice_obj = msg.get("voice") or msg.get("audio")
             file_id = voice_obj.get("file_id")
             if file_id:
                 try:
-                    from ouroboros.tools.stt_tools import _stt_from_telegram_file
-                    import types as _types
-                    import sys as _sys
-                    # Inject TG into stt module's telegram namespace
-                    _tg_mod = _sys.modules.get("supervisor.telegram") or _sys.modules.get("__main__")
-                    if not hasattr(_tg_mod, "TG"):
-                        # Create stub module with TG reference
-                        _stub = _types.ModuleType("supervisor.telegram")
-                        _stub.TG = TG
-                        _sys.modules["supervisor.telegram"] = _stub
-                    _class_ctx = type("_Ctx", (), {})()
-                    _transcript = _stt_from_telegram_file(_class_ctx, file_id)
-                    if _transcript and not _transcript.startswith("[STT error"):
-                        text = f"[Голосовое сообщение]: {_transcript}" + (f"\n{text}" if text else "")
-                        log.info("STT transcribed voice: %s...", _transcript[:60])
+                    # Download file via TG (already available in this scope)
+                    b64_voice, _mime_voice = TG.download_file_base64(file_id)
+                    if b64_voice:
+                        from ouroboros.tools.stt_tools import _stt_from_base64
+                        _transcript = _stt_from_base64(None, b64_voice, filename="voice.ogg")
+                        if _transcript and not _transcript.startswith("[STT error"):
+                            text = f"[Голосовое сообщение]: {_transcript}" + (f"\n{text}" if text else "")
+                            log.info("STT transcribed voice: %s...", _transcript[:60])
+                        else:
+                            text = f"[Голосовое сообщение — не удалось расшифровать: {_transcript}]"
                     else:
-                        text = f"[Голосовое сообщение — не удалось расшифровать: {_transcript}]"
+                        text = "[Голосовое сообщение — не удалось скачать файл с Telegram]"
                 except Exception as _e:
                     log.warning("STT failed: %s", _e)
                     text = f"[Голосовое сообщение — ошибка STT: {_e}]"
