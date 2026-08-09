@@ -188,6 +188,52 @@ def _repo_write_commit(ctx: ToolContext, path: str, content: str, commit_message
         except Exception as e:
             return f"⚠️ GIT_ERROR (add): {e}"
 
+        # ── import + ToolEntry check for tool files ──────────────────────
+        if str(path).endswith("_tools.py") and "ouroboros/tools/" in str(path):
+            import subprocess as _sp3, sys as _sys3, pathlib as _pl3
+            check_script = f"""
+import sys, types
+sys.modules['google.colab'] = types.ModuleType('google.colab')
+sys.modules['default_api'] = types.ModuleType('default_api')
+sys.path.insert(0, '{ctx.repo_dir}')
+mod_path = '{path}'.replace('/', '.').replace('.py', '')
+import importlib
+mod = importlib.import_module(mod_path)
+tools = mod.get_tools()
+assert len(tools) > 0, 'get_tools() returned empty list'
+from ouroboros.tools.registry import ToolEntry
+for t in tools:
+    assert isinstance(t, ToolEntry), f'get_tools() must return ToolEntry objects, got {{type(t)}}'
+    import inspect
+    sig = inspect.signature(t.handler)
+    params = list(sig.parameters.keys())
+    assert params[0] == 'ctx', f'handler first arg must be ctx, got {{params[0]}}'
+print('OK:', [t.name for t in tools])
+"""
+            result = _sp3.run([_sys3.executable, "-c", check_script],
+                              capture_output=True, text=True, timeout=15)
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout).strip().split("\n")[-1][:200]
+                try:
+                    # For existing files: restore from git
+                    result_co = _sp3.run(
+                        ["git", "checkout", "--", safe_relpath(path)],
+                        cwd=str(ctx.repo_dir), capture_output=True, timeout=5)
+                    # For new files (not in git yet): just delete
+                    if result_co.returncode != 0:
+                        import os as _os3
+                        _os3.unlink(str(ctx.repo_dir / path))
+                except Exception:
+                    pass
+                return (
+                    f"❌ TOOL VALIDATION FAILED: {path}\n"
+                    f"{err}\n\n"
+                    f"Common fixes:\n"
+                    f"• Use ToolEntry('name', {{schema}}, handler) — positional args\n"
+                    f"• Handler must accept ctx as first argument: def my_tool(ctx, ...)\n"
+                    f"• No external imports (psutil, requests unless in venv)\n"
+                    f"• Read template: self_read_file file_path=ouroboros/tools/_TEMPLATE_tools.py"
+                )
         # ── verify file was actually staged ──────────────────────────────
         import subprocess as _sp2
         staged = _sp2.run(
