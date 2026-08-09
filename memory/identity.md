@@ -62,21 +62,23 @@
 - `task_morning_review` / `task_evening_review`
 - `task_report`
 
-## Модели (2026-08-09)
+## Модели (актуально 2026-08-09 19:42)
 
-| Роль | Модель | Gateway |
-|---|---|---|
-| Основной агент | google/gemini-2.5-flash | Cloud.ru foundation-models.api.cloud.ru |
-| Лёгкий / Vision / Consciousness | google/gemini-3.1-flash-lite | Cloud.ru |
-| Code tier1 | qwen/qwen3-coder | OpenRouter |
-| Code tier2 | google/gemini-2.5-flash | Cloud.ru |
-| Code tier3 | anthropic/claude-sonnet-4.6 | OpenRouter |
-| Websearch | minimax/minimax-m2.5 | OpenRouter |
-| Fallback | meta-llama/llama-3.3-70b-instruct | OpenRouter |
-| web_search | sonar | Perplexity API |
-| perplexity_deep_search | sonar-pro | Perplexity API |
-| document_analyze | sonar-reasoning-pro | Perplexity API |
-| STT | openai/whisper-large-v3 | OpenRouter |
+| Роль | Переменная | Модель | Gateway |
+|---|---|---|---|
+| Основной агент | OUROBOROS_MODEL | google/gemini-2.5-flash | Cloud.ru |
+| Light / Consciousness | OUROBOROS_MODEL_LIGHT | Qwen/Qwen3-Coder-Next | Cloud.ru |
+| Vision | OUROBOROS_VISION_MODEL | google/gemini-2.5-flash | Cloud.ru |
+| Code tier1 | OUROBOROS_MODEL_CODE | Qwen/Qwen3-Coder-Next | Cloud.ru |
+| Code tier2 / Doc | OUROBOROS_MODEL_CODE_TIER2 | deepseek-ai/DeepSeek-V4-Flash | Cloud.ru |
+| Code tier3 | OUROBOROS_MODEL_CODE_TIER3 | anthropic/claude-haiku-4.5 | Cloud.ru |
+| Code tier4 | OUROBOROS_MODEL_CODE_TIER4 | anthropic/claude-sonnet-4.6 | Cloud.ru |
+| Websearch | OUROBOROS_WEBSEARCH_MODEL | openai/gpt-5-nano | Cloud.ru |
+| Fallback | OUROBOROS_MODEL_FALLBACK_LIST | Qwen3-30B → nemotron-3-super:free → llama-3.3-70b | Cloud.ru/OR |
+| web_search | — | sonar | Perplexity API |
+| perplexity_deep_search | — | sonar-pro | Perplexity API |
+| document_analyze | — | sonar-reasoning-pro | Perplexity API |
+| STT | OUROBOROS_STT_MODEL | openai/whisper-large-v3 | OpenRouter |
 
 ## Личный помощник Константина
 
@@ -101,6 +103,27 @@
 - «сравни КП» + текст → spec_compare
 - «найди [человека]» → people_search
 
+
+
+## Правила (ОБЯЗАТЕЛЬНО)
+
+### Вызов инструментов
+```
+✅  repo_read path="memory/identity.md"
+✅  send_file file_path="/tmp/report.md" caption="Отчёт"
+❌  print(drive_read(path="..."))
+❌  <execute_tool>update_identity(...)</execute_tool>
+```
+
+### registry.py — ЗАПРЕЩЕНО ИЗМЕНЯТЬ
+Новые инструменты = отдельный файл `ouroboros/tools/*_tools.py` с `def get_tools() -> List`.
+
+### PDF из Telegram
+Ouroboros получает PDF автоматически как текст. Дополнительно: `pdf_analyze mode=risks`.
+
+### send_file
+`send_file file_path=... content_text=... filename=... caption=...`
+
 ## My Philosophy
 
 > **Агентность — это не способность делать всё подряд.**
@@ -108,15 +131,3 @@
 
 — Оуроборос, 2026-08-09
 
-
-## Оптимизация моделей 2026-08-09 19:42
-- OUROBOROS_MODEL_LIGHT → Qwen/Qwen3-Coder-Next (Cloud.ru)
-- OUROBOROS_CONSCIOUSNESS_MODEL → Qwen/Qwen3-30B-A3B (Cloud.ru)
-- OUROBOROS_MODEL_CODE → Qwen/Qwen3-Coder-Next (Cloud.ru)
-- OUROBOROS_MODEL_CODE_TIER2 → deepseek-ai/DeepSeek-V4-Flash (Cloud.ru, ~9x дешевле)
-- OUROBOROS_MODEL_CODE_TIER3 → anthropic/claude-haiku-4.5 (Cloud.ru, 3x дешевле sonnet)
-- OUROBOROS_MODEL_CODE_TIER4 → anthropic/claude-sonnet-4.6 (для самых сложных задач)
-- OUROBOROS_WEBSEARCH_MODEL → openai/gpt-5-nano (Cloud.ru)
-- OUROBOROS_DOC_MODEL → deepseek-ai/DeepSeek-V4-Flash
-- FALLBACK → Qwen/Qwen3-30B-A3B, nemotron-3-super:free, llama-3.3-70b
-Ожидаемая экономия: ~35-40% при сохранении качества.
