@@ -180,6 +180,22 @@ def _repo_write_commit(ctx: ToolContext, path: str, content: str, commit_message
             run_cmd(["git", "add", safe_relpath(path)], cwd=ctx.repo_dir)
         except Exception as e:
             return f"⚠️ GIT_ERROR (add): {e}"
+
+        # ── verify file was actually staged ──────────────────────────────
+        import subprocess as _sp2
+        staged = _sp2.run(
+            ["git", "diff", "--cached", "--name-only"],
+            cwd=str(ctx.repo_dir), capture_output=True, text=True, timeout=5
+        ).stdout.strip()
+        rel = safe_relpath(path)
+        if rel not in staged:
+            return (
+                f"❌ FILE NOT STAGED: {path}\n"
+                f"The file was not added to git index. Check that the path is correct "
+                f"and the file was actually written. Staged files: {staged[:200] or 'none'}"
+            )
+        # ─────────────────────────────────────────────────────────────────
+
         try:
             run_cmd(["git", "commit", "-m", commit_message], cwd=ctx.repo_dir)
         except Exception as e:
