@@ -6,8 +6,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from ouroboros.utils import safe_relpath
-from ouroboros.supervisor.telegram_gateway import TelegramGateway # Added import
-
 
 @dataclass
 class BrowserState:
@@ -31,7 +29,7 @@ class ToolContext:
     current_task_type: Optional[str] = None
     last_push_succeeded: bool = False
     emit_progress_fn: Callable[[str], None] = field(default=lambda _: None)
-    tg: TelegramGateway = field(default=None) # Added tg: TelegramGateway
+    tg: Any = field(default=None)
 
     # LLM-driven model/effort switch (set by switch_model tool, read by loop.py)
     active_model_override: Optional[str] = None
@@ -93,7 +91,7 @@ class ToolRegistry:
     export get_tools() -> List[ToolEntry].
     """
 
-    def __init__(self, repo_dir: pathlib.Path, drive_root: pathlib.Path, tg: TelegramGateway): # Added tg
+    def __init__(self, repo_dir: pathlib.Path, drive_root: pathlib.Path, tg: Any = None):
         self._entries: Dict[str, ToolEntry] = {}
         self._ctx = ToolContext(repo_dir=repo_dir, drive_root=drive_root, tg=tg) # Pass tg
         self._load_modules()
