@@ -554,12 +554,36 @@ while True:
         elif msg.get("document"):
             doc = msg["document"]
             mime_type = str(doc.get("mime_type") or "")
+            file_name = str(doc.get("file_name") or "")
             if mime_type.startswith("image/"):
                 file_id = doc.get("file_id")
                 if file_id:
                     b64, mime = TG.download_file_base64(file_id)
                     if b64:
                         image_data = (b64, mime, caption)
+            elif mime_type == "application/pdf" or file_name.lower().endswith(".pdf"):
+                # PDF → extract text → prepend to message for agent
+                file_id = doc.get("file_id")
+                if file_id:
+                    try:
+                        b64_pdf, _ = TG.download_file_base64(file_id)
+                        if b64_pdf:
+                            from ouroboros.tools.pdf_tools import _extract_pdf_text
+                            import base64 as _b64
+                            pdf_bytes = _b64.b64decode(b64_pdf)
+                            pdf_text = _extract_pdf_text(pdf_bytes, max_pages=30)
+                            user_task = caption or text or "Проанализируй документ"
+                            text = (
+                                f"[PDF документ: {file_name}]\n"
+                                f"Задача: {user_task}\n\n"
+                                f"--- Содержимое PDF ---\n{pdf_text[:60000]}\n--- Конец PDF ---"
+                            )
+                            log.info("PDF extracted: %s, %d chars", file_name, len(pdf_text))
+                        else:
+                            text = f"[PDF документ: {file_name} — не удалось скачать]"
+                    except Exception as _e:
+                        log.warning("PDF extraction failed: %s", _e)
+                        text = f"[PDF документ: {file_name} — ошибка извлечения: {_e}]"
 
         st = load_state()
         if st.get("owner_id") is None:
