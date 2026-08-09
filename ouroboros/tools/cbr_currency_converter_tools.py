@@ -112,5 +112,32 @@ def cbr_currency_converter(amount: float, from_currency: str, to_currency: str, 
     """
     return converter_instance.convert_currency(amount, from_currency, to_currency, date)
 
-def get_tools() -> List:
-    return [cbr_currency_converter]
+def get_tools() -> List[ToolEntry]:
+    return [
+        ToolEntry(
+            "cbr_currency_convert",
+            {
+                "name": "cbr_currency_convert",
+                "description": (
+                    "Convert currency using CBR (Bank of Russia) official rates. "
+                    "Supports all major currencies: USD, EUR, CNY, GBP, JPY, RUB etc. "
+                    "Optionally specify a date for historical rates."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "amount": {"type": "number", "description": "Amount to convert"},
+                        "from_currency": {"type": "string", "description": "Source currency code (e.g. USD, EUR, CNY)"},
+                        "to_currency": {"type": "string", "description": "Target currency code (e.g. RUB, USD)"},
+                        "date": {"type": "string", "description": "Date for historical rate YYYY-MM-DD (optional)", "default": ""},
+                    },
+                    "required": ["amount", "from_currency", "to_currency"],
+                },
+            },
+            lambda ctx, amount, from_currency, to_currency, date="": (
+                f"{amount} {from_currency} = "
+                f"{round(converter_instance.convert_currency(float(amount), from_currency.upper(), to_currency.upper(), date or None), 2)} "
+                f"{to_currency} (курс ЦБ РФ)"
+            ),
+        )
+    ]
