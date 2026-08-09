@@ -61,8 +61,8 @@ def system_status(ctx=None) -> Dict[str, Any]: # Changed return type hint to Dic
     # Budget (assuming it's passed from context or a global store)
     try:
         status['budget'] = "N/A (supervisor provides this)"
-        if ctx and 'budget' in ctx: # Attempt to get budget from context if available
-            status['budget'] = f"${ctx['budget']['remaining_usd']:.2f} / ${ctx['budget']['total_usd']:.2f}"
+        if ctx and hasattr(ctx, 'budget') and ctx.budget: # Corrected access to budget
+            status['budget'] = f"${ctx.budget.remaining_usd:.2f} / ${ctx.budget.total_usd:.2f}"
     except Exception as e:
         status['budget'] = f"Error getting budget: {e}"
 
@@ -97,3 +97,4 @@ def get_tools() -> List[ToolEntry]:
             system_status,
         )
     ]
+
