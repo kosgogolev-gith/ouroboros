@@ -1,226 +1,241 @@
 from typing import List, Dict, Any, Optional
-import sqlite3
 from ouroboros.tools.registry import ToolEntry
-import os
+import sqlite3
+import datetime
 
-DB_PATH = os.path.join(os.getenv('DRIVE_ROOT', './'), 'memory', 'hardware_inventory.db')
+DATABASE_PATH = "hardware_inventory.db"
 
 def _init_db():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DATABASE_PATH)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS hardware_inventory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
-            model TEXT,
-            serial_number TEXT UNIQUE,
-            purchase_date TEXT,
-            parts_info TEXT
+            model TEXT NOT NULL,
+            serial_number TEXT UNIQUE NOT NULL,
+            purchase_date TEXT NOT NULL,
+            parts TEXT
         )
     """)
     conn.commit()
     conn.close()
 
-def _add_item(ctx, name: str, model: Optional[str] = None, serial_number: Optional[str] = None, 
-              purchase_date: Optional[str] = None, parts_info: Optional[str] = None) -> str:
-    _init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+_init_db() # Ensure DB is initialized on tool load
+
+def _add_hardware_handler(
+    ctx,
+    name: str,
+    model: str,
+    serial_number: str,
+    purchase_date: str,
+    parts: Optional[str] = None
+) -> str:
+    """Adds a new hardware item to the inventory."""
     try:
-        cursor.execute("""
-            INSERT INTO hardware_inventory (name, model, serial_number, purchase_date, parts_info)
-            VALUES (?, ?, ?, ?, ?)
-        """, (name, model, serial_number, purchase_date, parts_info))
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO hardware_inventory (name, model, serial_number, purchase_date, parts) VALUES (?, ?, ?, ?, ?)",
+            (name, model, serial_number, purchase_date, parts)
+        )
         conn.commit()
-        return f"✅ Item '{name}' added successfully."
+        conn.close()
+        return f"✅ Hardware '{name}' (S/N: {serial_number}) added to inventory."
     except sqlite3.IntegrityError:
-        return f"❌ Error: Item with serial number '{serial_number}' already exists."
+        return f"❌ Error: Hardware with serial number '{serial_number}' already exists."
     except Exception as e:
-        return f"❌ Error adding item: {e}"
-    finally:
-        conn.close()
+        return f"❌ Error adding hardware: {e}"
 
-def _list_items(ctx) -> str:
-    _init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+def _list_hardware_handler(ctx) -> List[Dict[str, Any]]:
+    """Lists all hardware items in the inventory."""
     try:
-        cursor.execute("SELECT id, name, model, serial_number, purchase_date, parts_info FROM hardware_inventory")
-        items = cursor.fetchall()
-        if not items:
-            return "No hardware items found."
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, model, serial_number, purchase_date, parts FROM hardware_inventory")
+        rows = cursor.fetchall()
+        conn.close()
         
-        headers = ["ID", "Name", "Model", "Serial Number", "Purchase Date", "Parts Info"]
-        rows = [list(item) for item in items]
-        
-        # Simple formatting for now
-        output = []
-        output.append("| " + " | ".join(headers) + " |")
-        output.append("|" + "---|"*len(headers))
+        results = []
         for row in rows:
-            output.append("| " + " | ".join(map(str, row)) + " |")
-        return "\n".join(output)
+            results.append({
+                "id": row[0],
+                "name": row[1],
+                "model": row[2],
+                "serial_number": row[3],
+                "purchase_date": row[4],
+                "parts": row[5]
+            })
+        return results
     except Exception as e:
-        return f"❌ Error listing items: {e}"
-    finally:
-        conn.close()
+        return f"❌ Error listing hardware: {e}"
 
-def _get_item(ctx, item_id: int) -> str:
-    _init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+def _get_hardware_handler(ctx, serial_number: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a single hardware item by serial number."""
     try:
-        cursor.execute("SELECT id, name, model, serial_number, purchase_date, parts_info FROM hardware_inventory WHERE id = ?", (item_id,))
-        item = cursor.fetchone()
-        if not item:
-            return f"❌ Item with ID {item_id} not found."
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, name, model, serial_number, purchase_date, parts FROM hardware_inventory WHERE serial_number = ?",
+            (serial_number,)
+        )
+        row = cursor.fetchone()
+        conn.close()
         
-        headers = ["ID", "Name", "Model", "Serial Number", "Purchase Date", "Parts Info"]
-        item_dict = dict(zip(headers, item))
-        return f"Item Details:\n" + "\n".join([f"{k}: {v}" for k, v in item_dict.items()])
+        if row:
+            return {
+                "id": row[0],
+                "name": row[1],
+                "model": row[2],
+                "serial_number": row[3],
+                "purchase_date": row[4],
+                "parts": row[5]
+            }
+        return None
     except Exception as e:
-        return f"❌ Error getting item: {e}"
-    finally:
-        conn.close()
+        return f"❌ Error getting hardware: {e}"
 
-def _update_item(ctx, item_id: int, name: Optional[str] = None, model: Optional[str] = None, 
-                 serial_number: Optional[str] = None, purchase_date: Optional[str] = None, 
-                 parts_info: Optional[str] = None) -> str:
-    _init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+def _update_hardware_handler(
+    ctx,
+    serial_number: str,
+    name: Optional[str] = None,
+    model: Optional[str] = None,
+    purchase_date: Optional[str] = None,
+    parts: Optional[str] = None
+) -> str:
+    """Updates an existing hardware item by serial number."""
     try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
         updates = []
         params = []
-        if name is not None:
+        if name:
             updates.append("name = ?")
             params.append(name)
-        if model is not None:
+        if model:
             updates.append("model = ?")
             params.append(model)
-        if serial_number is not None:
-            updates.append("serial_number = ?")
-            params.append(serial_number)
-        if purchase_date is not None:
+        if purchase_date:
             updates.append("purchase_date = ?")
             params.append(purchase_date)
-        if parts_info is not None:
-            updates.append("parts_info = ?")
-            params.append(parts_info)
-
-        if not updates:
-            return "No fields provided for update."
-
-        params.append(item_id)
+        if parts:
+            updates.append("parts = ?")
+            params.append(parts)
         
-        cursor.execute(f"UPDATE hardware_inventory SET {', '.join(updates)} WHERE id = ?", tuple(params))
-        conn.commit()
-        if cursor.rowcount == 0:
-            return f"❌ Item with ID {item_id} not found."
-        return f"✅ Item with ID {item_id} updated successfully."
-    except sqlite3.IntegrityError:
-        return f"❌ Error: Serial number '{serial_number}' already exists for another item."
-    except Exception as e:
-        return f"❌ Error updating item: {e}"
-    finally:
-        conn.close()
+        if not updates:
+            return "⚠️ No update parameters provided."
 
-def _delete_item(ctx, item_id: int) -> str:
-    _init_db()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    try:
-        cursor.execute("DELETE FROM hardware_inventory WHERE id = ?", (item_id,))
+        params.append(serial_number)
+        query = f"UPDATE hardware_inventory SET {', '.join(updates)} WHERE serial_number = ?"
+        cursor.execute(query, tuple(params))
         conn.commit()
-        if cursor.rowcount == 0:
-            return f"❌ Item with ID {item_id} not found."
-        return f"✅ Item with ID {item_id} deleted successfully."
-    except Exception as e:
-        return f"❌ Error deleting item: {e}"
-    finally:
         conn.close()
+        
+        if cursor.rowcount > 0:
+            return f"✅ Hardware with S/N '{serial_number}' updated successfully."
+        else:
+            return f"⚠️ Hardware with S/N '{serial_number}' not found."
+    except Exception as e:
+        return f"❌ Error updating hardware: {e}"
+
+def _delete_hardware_handler(ctx, serial_number: str) -> str:
+    """Deletes a hardware item by serial number."""
+    try:
+        conn = sqlite3.connect(DATABASE_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM hardware_inventory WHERE serial_number = ?",
+            (serial_number,)
+        )
+        conn.commit()
+        conn.close()
+        
+        if cursor.rowcount > 0:
+            return f"✅ Hardware with S/N '{serial_number}' deleted successfully."
+        else:
+            return f"⚠️ Hardware with S/N '{serial_number}' not found."
+    except Exception as e:
+        return f"❌ Error deleting hardware: {e}"
 
 
 def get_tools() -> List[ToolEntry]:
-    _init_db() # Ensure DB is initialized when tools are loaded
+    """Returns the list of ToolEntry objects for hardware inventory."""
     return [
         ToolEntry(
-            "hardware_add_item",
+            "hardware_add",
             {
-                "name": "hardware_add_item",
-                "description": "Добавляет новую единицу техники в базу данных.",
+                "name": "hardware_add",
+                "description": "Adds a new home appliance to the inventory database.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "name": {"type": "string", "description": "Название техники (например, 'Холодильник')."},
-                        "model": {"type": "string", "description": "Модель техники."},
-                        "serial_number": {"type": "string", "description": "Серийный номер техники (должен быть уникальным)."},
-                        "purchase_date": {"type": "string", "description": "Дата покупки (формат YYYY-MM-DD)."},
-                        "parts_info": {"type": "string", "description": "Информация о запчастях (например, 'Фильтр для воды 123-ABC')."},
+                        "name": {"type": "string", "description": "Name of the appliance"},
+                        "model": {"type": "string", "description": "Model of the appliance"},
+                        "serial_number": {"type": "string", "description": "Unique serial number"},
+                        "purchase_date": {"type": "string", "description": "Purchase date (YYYY-MM-DD)"},
+                        "parts": {"type": "string", "description": "List of typical spare parts", "default": None},
                     },
-                    "required": ["name"],
+                    "required": ["name", "model", "serial_number", "purchase_date"],
                 },
             },
-            _add_item,
+            _add_hardware_handler,
         ),
         ToolEntry(
-            "hardware_list_items",
+            "hardware_list",
             {
-                "name": "hardware_list_items",
-                "description": "Отображает список всей техники в базе данных.",
+                "name": "hardware_list",
+                "description": "Lists all home appliances in the inventory database.",
                 "parameters": {"type": "object", "properties": {}, "required": []},
             },
-            _list_items,
+            _list_hardware_handler,
         ),
         ToolEntry(
-            "hardware_get_item",
+            "hardware_get",
             {
-                "name": "hardware_get_item",
-                "description": "Получает детальную информацию о технике по её ID.",
+                "name": "hardware_get",
+                "description": "Retrieves a single home appliance by its serial number.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "item_id": {"type": "integer", "description": "ID элемента техники."},
+                        "serial_number": {"type": "string", "description": "Unique serial number of the appliance"},
                     },
-                    "required": ["item_id"],
+                    "required": ["serial_number"],
                 },
             },
-            _get_item,
+            _get_hardware_handler,
         ),
         ToolEntry(
-            "hardware_update_item",
+            "hardware_update",
             {
-                "name": "hardware_update_item",
-                "description": "Обновляет информацию о существующей единице техники по ID.",
+                "name": "hardware_update",
+                "description": "Updates an existing home appliance by its serial number.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "item_id": {"type": "integer", "description": "ID элемента техники."},
-                        "name": {"type": "string", "description": "Новое название техники."},
-                        "model": {"type": "string", "description": "Новая модель техники."},
-                        "serial_number": {"type": "string", "description": "Новый серийный номер техники (должен быть уникальным)."},
-                        "purchase_date": {"type": "string", "description": "Новая дата покупки (формат YYYY-MM-DD)."},
-                        "parts_info": {"type": "string", "description": "Новая информация о запчастях."},
+                        "serial_number": {"type": "string", "description": "Unique serial number of the appliance to update"},
+                        "name": {"type": "string", "description": "New name of the appliance", "default": None},
+                        "model": {"type": "string", "description": "New model of the appliance", "default": None},
+                        "purchase_date": {"type": "string", "description": "New purchase date (YYYY-MM-DD)", "default": None},
+                        "parts": {"type": "string", "description": "New list of typical spare parts", "default": None},
                     },
-                    "required": ["item_id"],
+                    "required": ["serial_number"],
                 },
             },
-            _update_item,
+            _update_hardware_handler,
         ),
         ToolEntry(
-            "hardware_delete_item",
+            "hardware_delete",
             {
-                "name": "hardware_delete_item",
-                "description": "Удаляет единицу техники из базы данных по её ID.",
+                "name": "hardware_delete",
+                "description": "Deletes a home appliance from the inventory by its serial number.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "item_id": {"type": "integer", "description": "ID элемента техники."},
+                        "serial_number": {"type": "string", "description": "Unique serial number of the appliance to delete"},
                     },
-                    "required": ["item_id"],
+                    "required": ["serial_number"],
                 },
             },
-            _delete_item,
+            _delete_hardware_handler,
         ),
     ]
