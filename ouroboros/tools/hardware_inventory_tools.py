@@ -13,7 +13,7 @@ def _init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             model TEXT NOT NULL,
-            serial_number TEXT UNIQUE NOT NULL,
+            serial_number TEXT,
             purchase_date TEXT NOT NULL,
             parts TEXT
         )
@@ -27,8 +27,8 @@ def _add_hardware_handler(
     ctx,
     name: str,
     model: str,
-    serial_number: str,
     purchase_date: str,
+    serial_number: Optional[str] = None,
     parts: Optional[str] = None
 ) -> str:
     """Adds a new hardware item to the inventory."""
@@ -41,7 +41,7 @@ def _add_hardware_handler(
         )
         conn.commit()
         conn.close()
-        return f"✅ Hardware '{name}' (S/N: {serial_number}) added to inventory."
+        return f"✅ Hardware '{name}' (S/N: {serial_number if serial_number else 'N/A'}) added to inventory."
     except sqlite3.IntegrityError:
         return f"❌ Error: Hardware with serial number '{serial_number}' already exists."
     except Exception as e:
@@ -150,11 +150,11 @@ def _delete_hardware_handler(ctx, serial_number: str) -> str:
         conn.commit()
         conn.close()
         
-        if cursor.rowcount > 0:
+        if cursor.rowcount > 0:\
             return f"✅ Hardware with S/N '{serial_number}' deleted successfully."
-        else:
+        else:\
             return f"⚠️ Hardware with S/N '{serial_number}' not found."
-    except Exception as e:
+    except Exception as e:\
         return f"❌ Error deleting hardware: {e}"
 
 
@@ -171,11 +171,11 @@ def get_tools() -> List[ToolEntry]:
                     "properties": {
                         "name": {"type": "string", "description": "Name of the appliance"},
                         "model": {"type": "string", "description": "Model of the appliance"},
-                        "serial_number": {"type": "string", "description": "Unique serial number"},
+                        "serial_number": {"type": "string", "description": "Unique serial number", "default": None},
                         "purchase_date": {"type": "string", "description": "Purchase date (YYYY-MM-DD)"},
                         "parts": {"type": "string", "description": "List of typical spare parts", "default": None},
                     },
-                    "required": ["name", "model", "serial_number", "purchase_date"],
+                    "required": ["name", "model", "purchase_date"],
                 },
             },
             _add_hardware_handler,
