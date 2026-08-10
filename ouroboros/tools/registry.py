@@ -106,8 +106,6 @@ class ToolRegistry:
                 continue
             try:
                 mod = importlib.import_module(f"ouroboros.tools.{modname}")
-                # АВТОРОБОРОС: Принудительная перезагрузка модуля для обеспечения актуальности изменений
-                importlib.reload(mod)
                 if hasattr(mod, "get_tools"):
                     for entry in mod.get_tools():
                         self._entries[entry.name] = entry
