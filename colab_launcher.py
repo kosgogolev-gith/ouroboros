@@ -490,6 +490,28 @@ while True:
     assign_tasks()
     persist_queue_snapshot(reason="main_loop")
 
+    # ── reminder_check: fire due reminders every loop iteration ──────
+    try:
+        import time as _time
+        _reminder_last = getattr(_reminder_check_state, 'last_check', 0)
+        if _time.time() - _reminder_last >= 60:  # check every 60 seconds
+            _reminder_check_state.last_check = _time.time()
+            from ouroboros.tools.reminder_tools import _reminder_check as _rc
+            class _RCtx:
+                pass
+            _fired = _rc(_RCtx())
+            if _fired:
+                import pathlib as _pl, json as _json
+                _state = _json.loads((_pl.Path.home() / "ouroboros_data" / "state" / "state.json").read_text())
+                _chat_id = _state.get("owner_chat_id")
+                if _chat_id:
+                    for _line in _fired.split("\n"):
+                        if _line.strip():
+                            TG.send_message(_chat_id, _line.strip())
+    except Exception as _re:
+        pass
+    # ─────────────────────────────────────────────────────────────────
+
     _now = time.time()
     # Poll Telegram — adaptive: fast when active, long-poll when idle
     _active = (_now - _last_message_ts) < _ACTIVE_MODE_SEC
