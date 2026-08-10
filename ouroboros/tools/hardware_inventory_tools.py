@@ -3,7 +3,8 @@ from ouroboros.tools.registry import ToolEntry
 import sqlite3
 import datetime
 
-DATABASE_PATH = "hardware_inventory.db"
+import pathlib
+DATABASE_PATH = str(pathlib.Path.home() / "ouroboros_data" / "hardware_inventory.db")
 
 def _init_db():
     conn = sqlite3.connect(DATABASE_PATH)
@@ -21,7 +22,6 @@ def _init_db():
     conn.commit()
     conn.close()
 
-_init_db() # Ensure DB is initialized on tool load
 
 def _add_hardware_handler(
     ctx,
@@ -32,6 +32,7 @@ def _add_hardware_handler(
     parts: Optional[str] = None
 ) -> str:
     """Adds a new hardware item to the inventory."""
+    _init_db()
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
@@ -49,6 +50,7 @@ def _add_hardware_handler(
 
 def _list_hardware_handler(ctx) -> List[Dict[str, Any]]:
     """Lists all hardware items in the inventory."""
+    _init_db()
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
