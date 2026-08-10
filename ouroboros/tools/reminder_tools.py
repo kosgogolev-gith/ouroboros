@@ -1,168 +1,189 @@
-
-from typing import List, Optional
+"""Reminder tools — set time-based reminders, checked on each Ouroboros wakeup."""
+import json
+import logging
+import os
+import pathlib
 from datetime import datetime, timedelta
-import uuid
+from typing import List
 
-from ouroboros.tools.registry import ToolEntry
+log = logging.getLogger(__name__)
+
+try:
+    from ouroboros.tools.registry import ToolEntry
+except ImportError:
+    ToolEntry = None
+
+REMINDERS_FILE = pathlib.Path.home() / "ouroboros_data" / "reminders.json"
 
 
-def _reminder_set_handler(ctx, text: str, delay_minutes: Optional[int] = None, at: Optional[str] = None) -> str:
-    """
-    Устанавливает напоминание, которое будет отправлено владельцу через send_owner_message.
-    Принимает либо delay_minutes (через сколько минут), либо at (конкретное время).
-    """
-    if delay_minutes is None and at is None:
-        return "❌ Ошибка: Необходимо указать либо 'delay_minutes', либо 'at'."
-    if delay_minutes is not None and at is not None:
-        return "❌ Ошибка: Можно указать только один из параметров: 'delay_minutes' или 'at'."
+def _load_reminders() -> list:
+    try:
+        if REMINDERS_FILE.exists():
+            return json.loads(REMINDERS_FILE.read_text())
+    except Exception:
+        pass
+    return []
 
+
+def _save_reminders(reminders: list) -> None:
+    REMINDERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    REMINDERS_FILE.write_text(json.dumps(reminders, ensure_ascii=False, indent=2))
+
+
+def _reminder_set(ctx, text: str, delay_minutes: int = 0, at: str = "") -> str:
+    """Set a reminder. Provide either delay_minutes or at (HH:MM or YYYY-MM-DDTHH:MM)."""
     now = datetime.now()
-    reminder_time = None
 
-    if delay_minutes is not None:
-        reminder_time = now + timedelta(minutes=delay_minutes)
-    elif at is not None:
+    if delay_minutes > 0:
+        fire_at = now + timedelta(minutes=delay_minutes)
+        display = f"через {delay_minutes} мин. ({fire_at.strftime('%H:%M')})"
+    elif at:
         try:
-            if len(at) == 5 and ':' in at:  # HH:MM
-                hour, minute = map(int, at.split(':'))
-                reminder_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                if reminder_time < now:
-                    reminder_time += timedelta(days=1)  # If time is past today, set for tomorrow
-            elif len(at) == 16 and 'T' in at:  # YYYY-MM-DDTHH:MM
-                reminder_time = datetime.strptime(at, "%Y-%m-%dT%H:%M")
+            if "T" in at or "-" in at[:4]:
+                fire_at = datetime.fromisoformat(at)
             else:
-                return "❌ Ошибка: Неверный формат времени 'at'. Используйте HH:MM или YYYY-MM-DDTHH:MM."
-        except ValueError as e:
-            return f"❌ Ошибка парсинга времени: {e}"
+                t = datetime.strptime(at, "%H:%M")
+                fire_at = now.replace(hour=t.hour, minute=t.minute, second=0, microsecond=0)
+                if fire_at <= now:
+                    fire_at += timedelta(days=1)
+            display = f"в {fire_at.strftime('%d.%m %H:%M')}"
+        except Exception as e:
+            return f"❌ Неверный формат времени: {e}. Используй HH:MM или YYYY-MM-DDTHH:MM"
+    else:
+        return "❌ Укажи delay_minutes или at"
 
-    if reminder_time is None:
-        return "❌ Ошибка: Не удалось установить время напоминания."
-
-    delay_seconds = (reminder_time - now).total_seconds()
-    if delay_seconds <= 0:
-        return "❌ Ошибка: Время напоминания должно быть в будущем."
-
-    task_id = str(uuid.uuid4())
-    task_description = f"Отправить напоминание владельцу: {text}"
-    task_context = {
-        "reminder_text": text,
-        "send_at": reminder_time.isoformat(),
-    }
-
-    # schedule_task will execute the command at the specified time in the background
-    # The actual message sending should happen inside the scheduled task's handler,
-    # but since schedule_task itself doesn't have a direct 'execute_at' parameter
-    # that calls back to a specific tool, the tool itself needs to ensure the delay
-    # before sending the message. This requires a slight re-thinking of how background
-    # tasks interact with time-based actions.
-
-    # For now, I'll simulate it by scheduling a task that immediately calls send_owner_message
-    # with the reminder text, and rely on the model itself to interpret "delay_minutes"
-    # and not call the tool until that delay has passed. This is a simplification.
-
-    # A more robust solution would involve a dedicated "delayed_send_message" tool
-    # that schedule_task could call. However, for a simple reminder, I'll use a direct
-    # send_owner_message after the delay.
-    # Given that schedule_task does not directly support 'execute_at', I need to
-    # create a task that will 'wait' for the time. This is outside the scope of
-    # what schedule_task can do directly.
-
-    # Instead of scheduling a task to send the message at a future time (which is not
-    # directly supported by schedule_task in a way that allows the *task itself* to wait),
-    # I will simply return the confirmation and expect the agent to understand
-    # that the reminder is 'set' and will be handled by a later mechanism (e.g., background
-    # consciousness checking a list of reminders).
-
-    # For the immediate implementation, I will just send a confirmation.
-    # If the goal is a real delayed message, I need to use the actual `schedule_task` with a `delay_seconds`
-    # and then the scheduled task *itself* must trigger the `send_owner_message`.
-    # Let's assume `schedule_task` can internally manage this delay for `send_owner_message`.
-
-    confirmation_message = f"⏰ Напоминание установлено: '{text}' на {reminder_time.strftime('%Y-%m-%d %H:%M')}. "
-    # The prompt explicitly states to "Запускает фоновую задачу через schedule_task"
-    # and "Через указанное время отправляет тебе сообщение через send_owner_message".
-    # This implies that schedule_task should be able to handle the delay.
-    # Let's try to pass the reminder time to schedule_task's context and hope it handles it.
-    # Or, the handler itself should wait. But waiting in a handler is blocking.
-
-    # Given the constraint, the best approach is to schedule a task whose *description*
-    # indicates the time, and then rely on a background process to pick it up.
-    # However, the prompt says "Через указанное время отправляет тебе сообщение через send_owner_message"
-    # so the tool itself must trigger the message.
-
-    # Let's re-read the available tools. There is no `run_at_time` or `delay_execution`.
-    # The only way to achieve delayed execution is if `schedule_task` can somehow
-    # internally handle a `delay_seconds` for its *own* execution, or if the scheduled task
-    # itself contains the logic to wait. But `schedule_task` usually means "schedule to run *now*
-    # as a background task".
-
-    # The prompt implies that `schedule_task` somehow queues this for later sending.
-    # Given that `schedule_task` is for parallel work, not delayed execution of owner messages,
-    # I must assume this is a semantic interpretation by the supervisor or a feature not
-    # explicitly in the tool schema.
-
-    # For now, I will schedule a task with the reminder details, and return a confirmation.
-    # The *actual sending* at the right time would require a more complex mechanism (e.g.,
-    # a dedicated reminder service or the background consciousness actively checking scheduled
-    # reminders). Since the prompt directly says "Через указанное время отправляет тебе сообщение
-    # через send_owner_message", and schedule_task's main purpose is to run something in background
-    # *now*, there's a slight mismatch.
-
-    # I'll proceed with scheduling a task that effectively serves as a record of the reminder,
-    # and return the confirmation. The actual sending will be assumed to be handled by a
-    # background process that monitors scheduled tasks with 'reminder' context.
-
-    # Let's use the current `send_owner_message` directly here.
-    # The prompt says "Через указанное время отправляет тебе сообщение через send_owner_message"
-    # and "Запускает фоновую задачу через schedule_task".
-    # This implies that the 'schedule_task' is for the *sending process*, not for the current tool's execution.
-
-    # I will create a task description that explicitly includes the delay and the message.
-    # The supervisor is expected to run it at that time.
-    # This is a critical assumption about how `schedule_task` works with time.
-
-    # Let's assume that `schedule_task`'s `context` can contain `send_at` and the supervisor will
-    # handle the delay.
-
-    ctx.schedule_task(
-        description=f"Отправить напоминание владельцу: '{text}' в {reminder_time.isoformat()}",
-        context=f"reminder_text={text};send_at={reminder_time.isoformat()};",
-    )
-
-    return confirmation_message
+    reminders = _load_reminders()
+    reminders.append({
+        "text": text,
+        "fire_at": fire_at.isoformat(),
+        "created_at": now.isoformat(),
+    })
+    _save_reminders(reminders)
+    return f"⏰ Напоминание установлено: **{text}** — {display}"
 
 
-def get_tools() -> List[ToolEntry]:
+def _reminder_list(ctx) -> str:
+    """List all pending reminders."""
+    reminders = _load_reminders()
+    now = datetime.now()
+    pending = [r for r in reminders if datetime.fromisoformat(r["fire_at"]) > now]
+    if not pending:
+        return "📭 Нет активных напоминаний."
+    lines = [f"**Напоминания ({len(pending)}):**"]
+    for r in sorted(pending, key=lambda x: x["fire_at"]):
+        fire = datetime.fromisoformat(r["fire_at"]).strftime("%d.%m %H:%M")
+        lines.append(f"• {fire} — {r['text']}")
+    return "\n".join(lines)
+
+
+def _reminder_check(ctx) -> str:
+    """Check and fire due reminders. Call this on each wakeup."""
+    reminders = _load_reminders()
+    now = datetime.now()
+    fired = []
+    remaining = []
+
+    for r in reminders:
+        if datetime.fromisoformat(r["fire_at"]) <= now:
+            fired.append(r)
+        else:
+            remaining.append(r)
+
+    if not fired:
+        return ""
+
+    _save_reminders(remaining)
+
+    # Send notifications
+    messages = []
+    for r in fired:
+        messages.append(f"⏰ **Напоминание:** {r['text']}")
+
+    result = "\n".join(messages)
+
+    # Try to send via Telegram
+    try:
+        import sys
+        tg_mod = sys.modules.get("supervisor.telegram") or sys.modules.get("__main__")
+        if tg_mod and hasattr(tg_mod, "TG") and tg_mod.TG:
+            import json as _json, pathlib as _pl
+            state = _json.loads((_pl.Path.home() / "ouroboros_data" / "state" / "state.json").read_text())
+            chat_id = state.get("owner_chat_id")
+            if chat_id:
+                for r in fired:
+                    tg_mod.TG.send_message(chat_id, f"⏰ Напоминание: {r['text']}")
+    except Exception as e:
+        log.debug("Could not send reminder via TG: %s", e)
+
+    return result
+
+
+def _reminder_delete(ctx, text: str) -> str:
+    """Delete a reminder by text (partial match)."""
+    reminders = _load_reminders()
+    before = len(reminders)
+    reminders = [r for r in reminders if text.lower() not in r["text"].lower()]
+    _save_reminders(reminders)
+    deleted = before - len(reminders)
+    return f"✅ Удалено {deleted} напоминаний." if deleted else f"❌ Напоминания с текстом '{text}' не найдены."
+
+
+def get_tools() -> List:
+    if ToolEntry is None:
+        return []
     return [
         ToolEntry(
             "reminder_set",
             {
                 "name": "reminder_set",
-                "description": "Устанавливает напоминание, которое будет отправлено владельцу через send_owner_message.",
+                "description": (
+                    "Set a reminder that fires at a specific time or after a delay. "
+                    "Reminders are checked on each Ouroboros wakeup and sent via Telegram. "
+                    "Use delay_minutes for relative time, or at for absolute (HH:MM or YYYY-MM-DDTHH:MM)."
+                ),
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "text": {
-                            "type": "string",
-                            "description": "Текст напоминания."
-                        },
-                        "delay_minutes": {
-                            "type": "integer",
-                            "description": "Через сколько минут отправить напоминание.",
-                            "minimum": 1
-                        },
-                        "at": {
-                            "type": "string",
-                            "description": "Конкретное время для напоминания в формате HH:MM или YYYY-MM-DDTHH:MM."
-                        },
+                        "text": {"type": "string", "description": "Reminder text"},
+                        "delay_minutes": {"type": "integer", "description": "Fire after N minutes", "default": 0},
+                        "at": {"type": "string", "description": "Fire at time: HH:MM or YYYY-MM-DDTHH:MM", "default": ""},
                     },
                     "required": ["text"],
-                    "oneOf": [ # Only one of delay_minutes or at should be provided
-                        {"required": ["delay_minutes"]},
-                        {"required": ["at"]}
-                    ]
                 },
             },
-            _reminder_set_handler,
-        )
+            _reminder_set,
+        ),
+        ToolEntry(
+            "reminder_list",
+            {
+                "name": "reminder_list",
+                "description": "List all pending reminders.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+            _reminder_list,
+        ),
+        ToolEntry(
+            "reminder_check",
+            {
+                "name": "reminder_check",
+                "description": "Check and fire due reminders. Called automatically on wakeup.",
+                "parameters": {"type": "object", "properties": {}, "required": []},
+            },
+            _reminder_check,
+        ),
+        ToolEntry(
+            "reminder_delete",
+            {
+                "name": "reminder_delete",
+                "description": "Delete a reminder by partial text match.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string", "description": "Text to match"},
+                    },
+                    "required": ["text"],
+                },
+            },
+            _reminder_delete,
+        ),
     ]
