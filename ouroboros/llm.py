@@ -203,6 +203,37 @@ class LLMClient:
             kwargs["tools"] = tools_with_cache
             kwargs["tool_choice"] = tool_choice
 
+        # ── Groq routing (cross-provider fallback) ───────────────────────
+        if str(model).startswith("groq/"):
+            groq_key = os.environ.get("GROQ_API_KEY", "")
+            groq_url = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+            if groq_key:
+                from openai import OpenAI as _OAI_Groq
+                _gc = _OAI_Groq(base_url=groq_url, api_key=groq_key)
+                _groq_model = model[5:]  # strip "groq/"
+                try:
+                    _gresp = _gc.chat.completions.create(
+                        model=_groq_model,
+                        messages=messages,
+                        max_tokens=kwargs.get("max_tokens", 4096),
+                    )
+                    _gmsg = _gresp.choices[0].message if _gresp.choices else None
+                    if _gmsg:
+                        _gu = _gresp.usage
+                        return (
+                            {"role": "assistant", "content": _gmsg.content or ""},
+                            {
+                                "prompt_tokens": _gu.prompt_tokens if _gu else 0,
+                                "completion_tokens": _gu.completion_tokens if _gu else 0,
+                                "total_tokens": _gu.total_tokens if _gu else 0,
+                                "cost_usd": 0.0,
+                            }
+                        )
+                except Exception as _ge:
+                    log.warning("Groq error for %s: %s", model, _ge)
+                    return None, {}
+        # ─────────────────────────────────────────────────────────────────
+
         resp = client.chat.completions.create(**kwargs)
         resp_dict = resp.model_dump()
         usage = resp_dict.get("usage") or {}
