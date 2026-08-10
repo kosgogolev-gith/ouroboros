@@ -512,6 +512,42 @@ while True:
         pass
     # ─────────────────────────────────────────────────────────────────
 
+    # ── morning briefing: send at 08:30 MSK every day ────────────────
+    try:
+        import datetime as _dt, time as _tm
+        _now_msk = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=3)))
+        _briefing_key = f"briefing_{_now_msk.strftime('%Y-%m-%d')}"
+        _briefing_sent = getattr(_reminder_check_state, 'briefing_sent', "")
+        if (_now_msk.hour == 8 and _now_msk.minute >= 30 and
+                _briefing_sent != _briefing_key and
+                not (PENDING or RUNNING)):
+            _reminder_check_state.briefing_sent = _briefing_key
+            import pathlib as _pl2, json as _json2
+            _state2 = _json2.loads((_pl2.Path.home() / "ouroboros_data" / "state" / "state.json").read_text())
+            _chat_id2 = _state2.get("owner_chat_id")
+            if _chat_id2:
+                from supervisor.queue import enqueue_task as _et
+                import uuid as _uuid
+                _et({
+                    "id": _uuid.uuid4().hex[:8],
+                    "type": "scheduled",
+                    "chat_id": int(_chat_id2),
+                    "text": (
+                        "Утренний брифинг для Константина. "
+                        "Выполни последовательно: "
+                        "1) weather_get city=Moscow date=today "
+                        "2) weather_get city=Moscow date=tomorrow "
+                        "3) icloud_today "
+                        "4) calendar_today "
+                        "5) task_morning_review "
+                        "6) reminder_list "
+                        "Собери всё в одно сообщение и отправь через send_owner_message."
+                    ),
+                })
+    except Exception as _be:
+        pass
+    # ─────────────────────────────────────────────────────────────────
+
     _now = time.time()
     # Poll Telegram — adaptive: fast when active, long-poll when idle
     _active = (_now - _last_message_ts) < _ACTIVE_MODE_SEC
