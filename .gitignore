@@ -31,3 +31,7 @@ Thumbs.db
 # Release artifacts (not tracked)
 .create_release.py
 .release_notes.md
+ouroboros_venv/
+*.db
+memory/hardware_inventory.db
+hardware_inventory.db
