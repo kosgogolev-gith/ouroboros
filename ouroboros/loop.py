@@ -715,21 +715,27 @@ def run_llm_loop(
                         f"All fallback models match the active one. Try rephrasing your request."
                     ), accumulated_usage, llm_trace
 
-                # Emit progress message so user sees fallback happening
-                fallback_progress = f"⚡ Fallback: {active_model} → {fallback_model} after empty response"
-                emit_progress(fallback_progress)
+                # Try each fallback in order until one succeeds
+                msg = None
+                tried = [active_model]
+                for fallback_model in fallback_candidates:
+                    if fallback_model in tried:
+                        continue
+                    tried.append(fallback_model)
+                    fallback_progress = f"⚡ Fallback: {tried[-2]} → {fallback_model} after empty response"
+                    emit_progress(fallback_progress)
+                    msg, fallback_cost = _call_llm_with_retry(
+                        llm, messages, fallback_model, tool_schemas, active_effort,
+                        max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type
+                    )
+                    if msg is not None:
+                        break
 
-                # Try fallback model (don't increment round_idx — this is still same logical round)
-                msg, fallback_cost = _call_llm_with_retry(
-                    llm, messages, fallback_model, tool_schemas, active_effort,
-                    max_retries, drive_logs, task_id, round_idx, event_queue, accumulated_usage, task_type
-                )
-
-                # If fallback also fails, give up
+                # All fallbacks failed
                 if msg is None:
                     return (
-                        f"⚠️ Failed to get a response from the model after {max_retries} attempts. "
-                        f"Fallback model ({fallback_model}) also returned no response."
+                        f"⚠️ Failed to get a response after trying {len(tried)} models: {', '.join(tried)}. "
+                        f"All providers may be down. Try again in a few minutes."
                     ), accumulated_usage, llm_trace
 
                 # Fallback succeeded — continue processing with this msg
