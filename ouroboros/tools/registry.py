@@ -93,7 +93,7 @@ class ToolRegistry:
 
     def __init__(self, repo_dir: pathlib.Path, drive_root: pathlib.Path, tg: Any = None):
         self._entries: Dict[str, ToolEntry] = {}
-        self._ctx = ToolContext(repo_dir=repo_dir, drive_root=drive_root, tg=tg) # Pass tg
+        self._ctx = ToolContext(repo_dir=repo_dir, drive_root=drive_root, tg=tg)
         self._load_modules()
 
     def _load_modules(self) -> None:
@@ -106,6 +106,8 @@ class ToolRegistry:
                 continue
             try:
                 mod = importlib.import_module(f"ouroboros.tools.{modname}")
+                # АВТОРОБОРОС: Принудительная перезагрузка модуля для обеспечения актуальности изменений
+                importlib.reload(mod)
                 if hasattr(mod, "get_tools"):
                     for entry in mod.get_tools():
                         self._entries[entry.name] = entry
