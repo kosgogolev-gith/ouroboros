@@ -72,14 +72,14 @@ def _list_hardware_handler(ctx) -> List[Dict[str, Any]]:
     except Exception as e:
         return f"❌ Error listing hardware: {e}"
 
-def _get_hardware_handler(ctx, serial_number: str) -> Optional[Dict[str, Any]]:
-    """Retrieves a single hardware item by serial number."""
+def _get_hardware_handler(ctx, name: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a single hardware item by name."""
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, name, model, serial_number, purchase_date, parts FROM hardware_inventory WHERE serial_number = ?",
-            (serial_number,)
+            "SELECT id, name, model, serial_number, purchase_date, parts FROM hardware_inventory WHERE name = ?",
+            (name,)
         )
         row = cursor.fetchone()
         conn.close()
@@ -89,7 +89,7 @@ def _get_hardware_handler(ctx, serial_number: str) -> Optional[Dict[str, Any]]:
                 "id": row[0],
                 "name": row[1],
                 "model": row[2],
-                "serial_number": row[3],\
+                "serial_number": row[3],
                 "purchase_date": row[4],
                 "parts": row[5]
             }
@@ -99,24 +99,24 @@ def _get_hardware_handler(ctx, serial_number: str) -> Optional[Dict[str, Any]]:
 
 def _update_hardware_handler(
     ctx,
-    serial_number: str,
-    name: Optional[str] = None,
+    name: str,
     model: Optional[str] = None,
+    serial_number: Optional[str] = None,
     purchase_date: Optional[str] = None,
     parts: Optional[str] = None
 ) -> str:
-    """Updates an existing hardware item by serial number."""
+    """Updates an existing hardware item by name (and optionally serial number if provided)."""
     try:
         conn = sqlite3.connect(DATABASE_PATH)
         cursor = conn.cursor()
         updates = []
         params = []
-        if name:
-            updates.append("name = ?")
-            params.append(name)
         if model:
             updates.append("model = ?")
             params.append(model)
+        if serial_number is not None:
+            updates.append("serial_number = ?")
+            params.append(serial_number)
         if purchase_date:
             updates.append("purchase_date = ?")
             params.append(purchase_date)
@@ -127,16 +127,23 @@ def _update_hardware_handler(
         if not updates:
             return "⚠️ No update parameters provided."
 
-        params.append(serial_number)
-        query = f"UPDATE hardware_inventory SET {', '.join(updates)} WHERE serial_number = ?"
+        query_conditions = ["name = ?"]
+        params.append(name)
+        
+        # If serial_number is provided, use it as an additional condition to narrow down the update
+        if serial_number is not None:
+            query_conditions.append("serial_number = ?")
+            params.append(serial_number)
+
+        query = f"UPDATE hardware_inventory SET {', '.join(updates)} WHERE {' AND '.join(query_conditions)}"
         cursor.execute(query, tuple(params))
         conn.commit()
         conn.close()
         
         if cursor.rowcount > 0:
-            return f"✅ Hardware with S/N '{serial_number}' updated successfully."
+            return f"✅ Hardware '{name}' updated successfully."
         else:
-            return f"⚠️ Hardware with S/N '{serial_number}' not found."
+            return f"⚠️ Hardware '{name}' not found or no changes made."
     except Exception as e:
         return f"❌ Error updating hardware: {e}"
 
@@ -162,7 +169,7 @@ def _delete_hardware_handler(ctx, name: str) -> str:
 
 def get_tools() -> List[ToolEntry]:
     """Returns the list of ToolEntry objects for hardware inventory."""
-    return [\
+    return [
         ToolEntry(
             "hardware_add",
             {
@@ -174,57 +181,57 @@ def get_tools() -> List[ToolEntry]:
                         "name": {"type": "string", "description": "Name of the appliance"},
                         "model": {"type": "string", "description": "Model of the appliance"},
                         "serial_number": {"type": "string", "description": "Unique serial number", "default": None},
-                        "purchase_date": {"type": "string", "description": "Purchase date (YYYY-MM-DD)"},\
+                        "purchase_date": {"type": "string", "description": "Purchase date (YYYY-MM-DD)"},
                         "parts": {"type": "string", "description": "List of typical spare parts", "default": None},
-                    },\
+                    },
                     "required": ["name", "model", "purchase_date"],
-                },\
-            },\
+                },
+            },
             _add_hardware_handler,
-        ),\
+        ),
         ToolEntry(
             "hardware_list",
             {
                 "name": "hardware_list",
                 "description": "Lists all home appliances in the inventory database.",
                 "parameters": {"type": "object", "properties": {}, "required": []},
-            },\
+            },
             _list_hardware_handler,
-        ),\
+        ),
         ToolEntry(
             "hardware_get",
             {
                 "name": "hardware_get",
-                "description": "Retrieves a single home appliance by its serial number.",
+                "description": "Retrieves a single home appliance by its name.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "serial_number": {"type": "string", "description": "Unique serial number of the appliance"},
-                    },\
-                    "required": ["serial_number"],
-                },\
-            },\
+                        "name": {"type": "string", "description": "Name of the appliance"},
+                    },
+                    "required": ["name"],
+                },
+            },
             _get_hardware_handler,
-        ),\
+        ),
         ToolEntry(
             "hardware_update",
             {
                 "name": "hardware_update",
-                "description": "Updates an existing home appliance by its serial number.",
+                "description": "Updates an existing home appliance by its name (and optionally serial number if provided).",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "serial_number": {"type": "string", "description": "Unique serial number of the appliance to update"},\
-                        "name": {"type": "string", "description": "New name of the appliance", "default": None},\
-                        "model": {"type": "string", "description": "New model of the appliance", "default": None},\
-                        "purchase_date": {"type": "string", "description": "New purchase date (YYYY-MM-DD)", "default": None},\
-                        "parts": {"type": "string", "description": "New list of typical spare parts", "default": None},\
-                    },\
-                    "required": ["serial_number"],
-                },\
-            },\
+                        "name": {"type": "string", "description": "Name of the appliance to update"},
+                        "model": {"type": "string", "description": "New model of the appliance", "default": None},
+                        "serial_number": {"type": "string", "description": "Unique serial number of the appliance to update", "default": None},
+                        "purchase_date": {"type": "string", "description": "New purchase date (YYYY-MM-DD)", "default": None},
+                        "parts": {"type": "string", "description": "New list of typical spare parts", "default": None},
+                    },
+                    "required": ["name"],
+                },
+            },
             _update_hardware_handler,
-        ),\
+        ),
         ToolEntry(
             "hardware_delete",
             {
@@ -234,10 +241,10 @@ def get_tools() -> List[ToolEntry]:
                     "type": "object",
                     "properties": {
                         "name": {"type": "string", "description": "Name of the appliance to delete"},
-                    },\
+                    },
                     "required": ["name"],
-                },\
-            },\
+                },
+            },
             _delete_hardware_handler,
-        ),\
+        ),
     ]
