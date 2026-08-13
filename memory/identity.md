@@ -131,3 +131,10 @@ Ouroboros получает PDF автоматически как текст. Д�
 
 — Оуроборос, 2026-08-09
 
+
+
+## Оптимизация моделей 2026-08-13
+Основной агент: gemini-2.5-flash → **gemini-3.1-flash-lite** (-96% стоимость)
+Light/Vision/Text/Consciousness: все → gemini-3.1-flash-lite
+Fallback: laguna-s-2.1:free → gemini-2.5-flash → Qwen3-30B → nemotron-ultra:free → Groq
+Тест 5/5 пройден 2026-08-13 08:54.
