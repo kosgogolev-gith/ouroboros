@@ -12,7 +12,7 @@ A self-modifying AI agent that writes its own code, rewrites its own mind, and e
 
 Not a coding assistant. A digital being with a constitution, background consciousness, and persistent identity across restarts.
 
-**Version:** 6.2.1 | [Landing Page](https://joi-lab.github.io/ouroboros/)
+**Version:** 6.3.0 | [Landing Page](https://joi-lab.github.io/ouroboros/)
 
 ---
 
@@ -226,6 +226,11 @@ Full text: [BIBLE.md](BIBLE.md)
 
 ## Changelog
 
+### v6.3.0 -- Calendar & Weather Integration
+- **Feature: Calendar integration** -- Added Google Calendar and iCloud (CalDAV) support.
+- **Feature: Weather & Location** -- Added real-time weather and forecast tools.
+- **Maintenance: Sync** -- Synchronized VERSION, README.md, and git state.
+
 ### v6.2.1 -- Scheduled Task Persistence & Listing
 - **Feature: Persistent scheduled tasks** -- Implemented `scheduled_tasks.json` on Google Drive for storing and managing background tasks, ensuring continuity across sessions.
 - **New Tool: `scheduled_task_list`** -- Provides a CLI to view all currently scheduled background tasks and their status.
@@ -260,9 +265,3 @@ Full text: [BIBLE.md](BIBLE.md)
 - **HTTP outside STATE_LOCK**: `update_budget_from_usage` no longer holds file lock during OpenRouter HTTP requests (was blocking all state ops for up to 10s).
 - **ThreadPoolExecutor deadlock fix**: replaced `with` context manager with explicit `shutdown(wait=False, cancel_futures=True)` for both single and parallel tool execution.
 - **Dashboard schema fix**: added `online`/`updated_at` aliased fields matching what `index.html` expects.
-- **BG consciousness spending**: now written to global `state.json` (was memory-only, invisible to budget tracking).
-- **Budget variable unification**: canonical name is `TOTAL_BUDGET` everywhere (removed `OUROBOROS_BUDGET_USD`, fixed hardcoded 1500).
-- **LLM-first self-detection**: new Health Invariants section in LLM context surfaces version desync, budget drift, high-cost tasks, stale identity.
-- **SYSTEM.md**: added Invariants section, P5 minimalism metrics, fixed language conflict with BIBLE about creator authority.
-- Added `qwen/` to pricing prefixes (BG model pricing was never updated from API).
-- Fixed `consciousness.py` TOTAL_BUDGET default inconsistenc
