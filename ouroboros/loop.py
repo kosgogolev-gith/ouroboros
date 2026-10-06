@@ -701,7 +701,7 @@ def run_llm_loop(
                 # Configurable fallback priority list (Bible P3: no hardcoded behavior)
                 fallback_list_raw = os.environ.get(
                     "OUROBOROS_MODEL_FALLBACK_LIST",
-                    "google/gemini-2.5-pro-preview,openai/o3,anthropic/claude-sonnet-4.6"
+                    "nvidia/nemotron-3.5-lightning:free,nvidia/nemotron-3-super-120b-a12b:free"
                 )
                 fallback_candidates = [m.strip() for m in fallback_list_raw.split(",") if m.strip()]
                 fallback_model = None

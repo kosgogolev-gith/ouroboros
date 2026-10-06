@@ -20,7 +20,7 @@ from ouroboros.tools.registry import ToolContext, ToolEntry
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_VLM_MODEL = "anthropic/claude-sonnet-4.6"
+_DEFAULT_VLM_MODEL = "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
 
 
 def _get_vlm_model() -> str:
