@@ -9,6 +9,26 @@ from typing import Any, Dict, List
 from ouroboros.tools.registry import ToolContext, ToolEntry
 
 
+def _pplx_endpoint():
+    """Perplexity Sonar endpoint: direct API if PERPLEXITY_API_KEY set, else via OpenRouter."""
+    import os
+    key = os.environ.get("PERPLEXITY_API_KEY", "")
+    if key:
+        return "https://api.perplexity.ai/chat/completions", key, ""
+    key = os.environ.get("OPENROUTER_API_KEY", "")
+    return "https://openrouter.ai/api/v1/chat/completions", key, "perplexity/"
+
+
+def _pplx_sources(d: dict) -> list:
+    sources = list(d.get("citations") or [])
+    for ch in d.get("choices") or []:
+        for a in (ch.get("message") or {}).get("annotations") or []:
+            u = (a.get("url_citation") or {}).get("url")
+            if u and u not in sources:
+                sources.append(u)
+    return sources
+
+
 def _ddg_search(query: str, max_results: int = 5) -> list:
     """Search via DuckDuckGo — Instant Answer API first, HTML fallback for Russian."""
     import urllib.request, urllib.parse, re
@@ -71,23 +91,23 @@ def _brave_search(query: str, max_results: int = 5) -> list:
 def _perplexity_search(query: str) -> str:
     """Search via Perplexity sonar API — returns answer + sources."""
     import urllib.request, os
-    key = os.environ.get("PERPLEXITY_API_KEY", "")
+    url, key, pfx = _pplx_endpoint()
     if not key:
         return ""
     payload = json.dumps({
-        "model": "sonar",
+        "model": pfx + os.environ.get("OUROBOROS_SONAR_MODEL_SONAR", "sonar"),
         "messages": [{"role": "user", "content": query}],
         "max_tokens": 512,
     }).encode()
     req = urllib.request.Request(
-        "https://api.perplexity.ai/chat/completions",
+        url,
         data=payload,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         d = json.loads(resp.read())
     answer = d["choices"][0]["message"]["content"]
-    sources = d.get("citations", [])
+    sources = _pplx_sources(d)
     lines = [f"**{query}**\n", answer]
     if sources:
         lines.append("\n**Источники:**")
@@ -129,12 +149,12 @@ def _perplexity_deep_search(ctx: ToolContext, query: str, focus: str = "") -> st
     focus: optional context hint (e.g. 'GPU infrastructure', 'pricing', 'technical specs')
     """
     import urllib.request, os
-    key = os.environ.get("PERPLEXITY_API_KEY", "")
+    url, key, pfx = _pplx_endpoint()
     if not key:
-        return "❌ PERPLEXITY_API_KEY not set."
+        return "❌ PERPLEXITY_API_KEY / OPENROUTER_API_KEY not set."
     full_query = f"{query}. {focus}" if focus else query
     payload = json.dumps({
-        "model": "sonar-pro",
+        "model": pfx + os.environ.get("OUROBOROS_SONAR_MODEL_SONAR_PRO", "sonar-pro"),
         "messages": [
             {"role": "system", "content": (
                 "You are an expert research assistant. "
@@ -146,14 +166,14 @@ def _perplexity_deep_search(ctx: ToolContext, query: str, focus: str = "") -> st
         "max_tokens": 1024,
     }).encode()
     req = urllib.request.Request(
-        "https://api.perplexity.ai/chat/completions",
+        url,
         data=payload,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
         d = json.loads(resp.read())
     answer = d["choices"][0]["message"]["content"]
-    sources = d.get("citations", [])
+    sources = _pplx_sources(d)
     lines = [f"🔍 **Deep Search: {query}**\n", answer]
     if sources:
         lines.append("\n**Источники:**")
@@ -168,9 +188,9 @@ def _document_analyze(ctx: ToolContext, document_text: str, task: str = "",
     Supports: analyze, summarize, extract, compare, risks, tco.
     """
     import urllib.request, os
-    key = os.environ.get("PERPLEXITY_API_KEY", "")
+    url, key, pfx = _pplx_endpoint()
     if not key:
-        return "❌ PERPLEXITY_API_KEY not set."
+        return "❌ PERPLEXITY_API_KEY / OPENROUTER_API_KEY not set."
 
     mode_prompts = {
         "analyze":   "Проанализируй документ детально. Выдели ключевые факты, цифры, условия.",
@@ -190,7 +210,7 @@ def _document_analyze(ctx: ToolContext, document_text: str, task: str = "",
         document_text = document_text[:max_doc_chars] + "\n\n[...документ обрезан до 80000 символов]"
 
     payload = json.dumps({
-        "model": "sonar-reasoning-pro",
+        "model": pfx + os.environ.get("OUROBOROS_SONAR_MODEL_SONAR_REASONING_PRO", "sonar-reasoning-pro"),
         "messages": [
             {"role": "system", "content": (
                 "You are an expert document analyst specializing in technical and commercial documents. "
@@ -203,7 +223,7 @@ def _document_analyze(ctx: ToolContext, document_text: str, task: str = "",
     }).encode()
 
     req = urllib.request.Request(
-        "https://api.perplexity.ai/chat/completions",
+        url,
         data=payload,
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
