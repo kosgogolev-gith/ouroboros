@@ -119,6 +119,11 @@ class LLMClient:
             self._api_key = cloudru_key
             self._base_url = cloudru_base.rstrip("/")
             self._is_cloudru = True
+        elif os.environ.get("OUROBOROS_LLM_BASE_URL") and not api_key:
+            # LLM gateway (LiteLLM): routing, fallbacks, tracing in Langfuse
+            self._api_key = os.environ.get("OUROBOROS_LLM_API_KEY", "")
+            self._base_url = os.environ["OUROBOROS_LLM_BASE_URL"].rstrip("/")
+            self._is_cloudru = False
         else:
             self._api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
             self._base_url = base_url
@@ -140,6 +145,8 @@ class LLMClient:
 
     def _fetch_generation_cost(self, generation_id: str) -> Optional[float]:
         """Fetch cost from OpenRouter Generation API as fallback."""
+        if "openrouter.ai" not in self._base_url:
+            return None
         try:
             import requests
             url = f"{self._base_url.rstrip('/')}/generation?id={generation_id}"
