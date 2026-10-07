@@ -1,0 +1,49 @@
+# Единый LLM-шлюз. Только бесплатные модели OpenRouter + Perplexity Sonar (прямой API).
+model_list:
+  - model_name: nvidia/nemotron-3-super-120b-a12b:free
+    litellm_params: { model: openrouter/nvidia/nemotron-3-super-120b-a12b:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: nvidia/nemotron-3.5-lightning:free
+    litellm_params: { model: openrouter/nvidia/nemotron-3.5-lightning:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: nvidia/nemotron-3-ultra-550b-a55b:free
+    litellm_params: { model: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+    litellm_params: { model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: google/gemma-4-31b-it:free
+    litellm_params: { model: openrouter/google/gemma-4-31b-it:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: cohere/north-mini-code:free
+    litellm_params: { model: openrouter/cohere/north-mini-code:free, api_key: os.environ/OPENROUTER_API_KEY }
+  # Короткие алиасы
+  - model_name: main
+    litellm_params: { model: openrouter/nvidia/nemotron-3-super-120b-a12b:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: light
+    litellm_params: { model: openrouter/nvidia/nemotron-3.5-lightning:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: code
+    litellm_params: { model: openrouter/cohere/north-mini-code:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: vision
+    litellm_params: { model: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free, api_key: os.environ/OPENROUTER_API_KEY }
+  - model_name: sonar
+    litellm_params: { model: perplexity/sonar, api_key: os.environ/PERPLEXITY_API_KEY }
+
+router_settings:
+  num_retries: 2
+  timeout: 120
+  allowed_fails: 3
+  cooldown_time: 60
+  fallbacks:
+    - nvidia/nemotron-3-super-120b-a12b:free: [nvidia/nemotron-3.5-lightning:free, nvidia/nemotron-3-ultra-550b-a55b:free, google/gemma-4-31b-it:free]
+    - main: [light, nvidia/nemotron-3-ultra-550b-a55b:free]
+    - nvidia/nemotron-3.5-lightning:free: [nvidia/nemotron-3-super-120b-a12b:free]
+    - light: [main]
+    - cohere/north-mini-code:free: [nvidia/nemotron-3-super-120b-a12b:free]
+    - code: [main]
+    - nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free: [google/gemma-4-31b-it:free]
+    - vision: [google/gemma-4-31b-it:free]
+
+litellm_settings:
+  drop_params: true
+  success_callback: ["langfuse"]
+  failure_callback: ["langfuse"]
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL

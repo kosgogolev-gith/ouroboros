@@ -1,0 +1,17 @@
+{
+	admin off
+	auto_https off
+}
+# Доступ только с адреса CADDY_BIND (127.0.0.1 или IP Tailscale)
+http://{$CADDY_BIND}:8401 {
+	bind {$CADDY_BIND}
+	reverse_proxy 127.0.0.1:4000
+}
+http://{$CADDY_BIND}:8402 {
+	bind {$CADDY_BIND}
+	reverse_proxy 127.0.0.1:5678
+}
+http://{$CADDY_BIND}:8403 {
+	bind {$CADDY_BIND}
+	reverse_proxy 127.0.0.1:3000
+}
