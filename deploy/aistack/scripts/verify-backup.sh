@@ -1,7 +1,10 @@
 #!/bin/bash
 # Проверка бэкапа: целостность репозитория + реальное восстановление дампа Postgres во временный контейнер.
 set -euo pipefail
-source /opt/aistack/.backup.env; export RESTIC_REPOSITORY RESTIC_PASSWORD
+set -a; source /opt/aistack/.backup.env; set +a
+# Проверяем именно внешнюю копию (S3), если она настроена
+[ -n "${S3_REPOSITORY:-}" ] && export RESTIC_REPOSITORY=$S3_REPOSITORY
+echo "repo: $RESTIC_REPOSITORY"
 restic check --read-data-subset=10%
 T=$(mktemp -d); trap 'rm -rf "$T"; docker rm -f pg-restore-test >/dev/null 2>&1 || true' EXIT
 restic restore latest --target "$T" --include /var/backups/aistack-stage/postgres_all.sql.gz
