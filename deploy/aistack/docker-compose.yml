@@ -170,6 +170,7 @@ services:
     network_mode: host
     environment:
       CADDY_BIND: ${CADDY_BIND}
+      TS_IP: ${TS_IP}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
