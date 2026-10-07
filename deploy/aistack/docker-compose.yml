@@ -171,6 +171,7 @@ services:
     environment:
       CADDY_BIND: ${CADDY_BIND}
       TS_IP: ${TS_IP}
+      AMN_IP: ${AMN_IP}
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

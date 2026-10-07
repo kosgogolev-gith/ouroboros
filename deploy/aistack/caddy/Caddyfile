@@ -4,14 +4,14 @@
 }
 # Доступ: localhost (SSH-туннель) и Tailscale. Публично не открыто.
 :8401 {
-	bind 127.0.0.1 {$TS_IP}
+	bind 127.0.0.1 {$TS_IP} {$AMN_IP}
 	reverse_proxy 127.0.0.1:4000
 }
 :8402 {
-	bind 127.0.0.1 {$TS_IP}
+	bind 127.0.0.1 {$TS_IP} {$AMN_IP}
 	reverse_proxy 127.0.0.1:5678
 }
 :8403 {
-	bind 127.0.0.1 {$TS_IP}
+	bind 127.0.0.1 {$TS_IP} {$AMN_IP}
 	reverse_proxy 127.0.0.1:3000
 }

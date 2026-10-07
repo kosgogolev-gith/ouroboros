@@ -1,0 +1,9 @@
+[Unit]
+Description=Allow aistack web UIs from Amnezia VPN clients (amn0 only)
+After=docker.service network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'iptables -C INPUT -i amn0 -p tcp -m multiport --dports 8401,8402,8403 -j ACCEPT 2>/dev/null || iptables -I INPUT 1 -i amn0 -p tcp -m multiport --dports 8401,8402,8403 -j ACCEPT'
+[Install]
+WantedBy=multi-user.target
