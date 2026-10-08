@@ -6,10 +6,10 @@ import time
 import sys
 import os
 
-# Add the ouroboros package to path
-sys.path.insert(0, '/home/goga/ouroboros_repo/ouroboros')
+# Add the repo root to path so we can import ouroboros package
+sys.path.insert(0, '/home/goga/ouroboros_repo')
 
-from llm import LLMClient
+from ouroboros.llm import LLMClient
 
 def test_model(model_id, prompt_text):
     """Test a single model with a prompt, return metrics."""
